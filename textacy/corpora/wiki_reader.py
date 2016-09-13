@@ -69,7 +69,7 @@ class WikiReader(object):
         yielding one (page id, title, page content) 3-tuple at a time.
         """
         if PY2 is False:
-            for title, content, page_id in extract_pages(open_sesame(self.wikicorpus.fname, mode='rt'),
+            for title, content, page_id in extract_pages(open_sesame(self.wikicorpus.fname, mode='rt', encoding='utf-8'),
                                                          self.wikicorpus.filter_namespaces):
                 yield (page_id, title, content)
         else:  # Python 2 sucks and can't open bzip in text mode
