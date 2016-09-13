@@ -118,7 +118,10 @@ class WikiReader(object):
                         sec['level'] = 1
                 # strip out references, tables, and file/image links
                 for obj in section.ifilter_tags(matches=_filter_tags, recursive=True):
-                    section.remove(obj)
+                    try:
+                        section.remove(obj)
+                    except Exception:
+                        pass
                 for obj in section.ifilter_wikilinks(recursive=True):
                     try:
                         obj_title = str(obj.title)
