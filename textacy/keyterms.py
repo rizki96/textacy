@@ -6,135 +6,158 @@ Also includes a function to aggregate common key term variants of the same idea.
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from collections import Counter, defaultdict
-from decimal import Decimal
+import collections
 import itertools
+import logging
 import math
-from operator import itemgetter
+import operator
+from decimal import Decimal
 
-from cytoolz import itertoolz
-from fuzzywuzzy.fuzz import token_sort_ratio
 import networkx as nx
 import numpy as np
+from cytoolz import itertoolz
 
-from textacy import extract, spacy_utils
-from textacy import vsm
-from textacy.network import terms_to_semantic_network
+from . import compat
+from . import extract
+from . import network
+from . import similarity
+from . import vsm
+
+LOGGER = logging.getLogger(__name__)
 
 
-def sgrank(doc, window_width=1500, n_keyterms=10, idf=None):
+def sgrank(doc, ngrams=(1, 2, 3, 4, 5, 6), normalize='lemma', window_width=1500,
+           n_keyterms=10, idf=None):
     """
     Extract key terms from a document using the [SGRank]_ algorithm.
 
     Args:
         doc (``textacy.Doc`` or ``spacy.Doc``)
-        window_width (int): width of sliding window in which term
-            co-occurrences are said to occur
-        n_keyterms (int or float): if int, number of top-ranked terms
-            to return as keyterms; if float, must be in the open interval (0, 1),
-            representing the fraction of top-ranked terms to return as keyterms
-        idf (dict): mapping of
-            {`normalized_str(term) <textacy.spacy_utils.normalized_str>`: inverse document frequency}
-            for re-weighting of unigrams (n-grams with n > 1 have df assumed = 1);
-            NOTE: results are better with idf information
+        ngrams (int or Set[int]): n of which n-grams to include; ``(1, 2, 3, 4, 5, 6)``
+                (default) includes all ngrams from 1 to 6; `2`
+                if only bigrams are wanted
+        normalize (str or callable): If 'lemma', lemmatize terms; if 'lower',
+            lowercase terms; if None, use the form of terms as they appeared in
+            ``doc``; if a callable, must accept a ``spacy.Span`` and return a str,
+            e.g. :func:`textacy.spacier.utils.get_normalized_text()`
+        window_width (int): Width of sliding window in which term
+            co-occurrences are determined to occur. Note: Larger values may
+            dramatically increase runtime, owing to the larger number of
+            co-occurrence combinations that must be counted.
+        n_keyterms (int or float): Number of top-ranked terms to return as
+            keyterms. If int, represents the absolute number; if float, must be
+            in the open interval (0.0, 1.0), and is converted to an integer by
+            ``int(round(len(doc) * n_keyterms))``
+        idf (dict): Mapping of ``normalize(term)`` to inverse document frequency
+            for re-weighting of unigrams (n-grams with n > 1 have df assumed = 1).
+            Results are typically better with idf information.
 
     Returns:
-        List[Tuple[str, float]]: sorted list of top ``n_keyterms`` key terms and their
-            corresponding SGRank scores
+        List[Tuple[str, float]]: sorted list of top ``n_keyterms`` key terms and
+        their corresponding SGRank scores
 
     Raises:
-        ValueError: if ``n_keyterms`` is a float but not in (0.0, 1.0]
+        ValueError: If ``n_keyterms`` is a float but not in (0.0, 1.0] or
+            ``window_width`` < 2.
 
     References:
         .. [SGRank] Danesh, Sumner, and Martin. "SGRank: Combining Statistical and
            Graphical Methods to Improve the State of the Art in Unsupervised Keyphrase
            Extraction". Lexical and Computational Semantics (* SEM 2015) (2015): 117.
     """
+    n_toks = len(doc)
     if isinstance(n_keyterms, float):
         if not 0.0 < n_keyterms <= 1.0:
             raise ValueError('`n_keyterms` must be an int, or a float between 0.0 and 1.0')
-    n_toks = len(doc)
-    min_term_freq = min(n_toks // 1500, 4)
+        n_keyterms = int(round(n_toks * n_keyterms))
+    if window_width < 2:
+        raise ValueError('`window_width` must be >= 2')
+    window_width = min(n_toks, window_width)
+    min_term_freq = min(n_toks // 1000, 4)
+    if isinstance(ngrams, int):
+        ngrams = (ngrams,)
 
     # build full list of candidate terms
-    terms = list(itertoolz.concat(
+    # if inverse doc freqs available, include nouns, adjectives, and verbs;
+    # otherwise, just include nouns and adjectives
+    # (without IDF downweighting, verbs dominate the results in a bad way)
+    include_pos = {'NOUN', 'PROPN', 'ADJ', 'VERB'} if idf else {'NOUN', 'PROPN', 'ADJ'}
+    terms = itertoolz.concat(
         extract.ngrams(doc, n, filter_stops=True, filter_punct=True, filter_nums=False,
-                       include_pos={'NOUN', 'ADJ'}, min_freq=min_term_freq)
-        for n in range(1, 7)))
-    # if inverse document frequencies available, also add verbs
-    # verbs without IDF downweighting dominate the results, and not in a good way
-    if idf:
-        terms.extend(itertoolz.concat(
-            extract.ngrams(doc, n, filter_stops=True, filter_punct=True, filter_nums=False,
-                           include_pos={'VERB'}, min_freq=min_term_freq)
-            for n in range(1, 7)))
+                       include_pos=include_pos, min_freq=min_term_freq)
+        for n in ngrams)
 
-    terms_as_strs = {id(term): spacy_utils.normalized_str(term)
-                     for term in terms}
-
-    # pre-filter terms to the top 20% ranked by TF or modified TF*IDF, if available
-    n_top_20pct = int(len(terms) * 0.2)
-    term_counts = Counter(terms_as_strs[id(term)] for term in terms)
-    if idf:
-        mod_tfidfs = {term: count * idf[term] if ' ' not in term else count
-                      for term, count in term_counts.items()}
-        top_term_texts = {term for term, _ in sorted(
-            mod_tfidfs.items(), key=itemgetter(1), reverse=True)[:n_top_20pct]}
+    # get normalized term strings, as desired
+    # paired with positional index in document and length in a 3-tuple
+    if normalize == 'lemma':
+        terms = [(term.lemma_, term.start, len(term)) for term in terms]
+    elif normalize == 'lower':
+        terms = [(term.lower_, term.start, len(term)) for term in terms]
+    elif not normalize:
+        terms = [(term.text, term.start, len(term)) for term in terms]
     else:
-        top_term_texts = {term for term, _ in term_counts.most_common(n_top_20pct)}
+        terms = [(normalize(term), term.start, len(term)) for term in terms]
 
-    terms = [term for term in terms
-             if terms_as_strs[id(term)] in top_term_texts]
+    # pre-filter terms to the top N ranked by TF or modified TF*IDF
+    n_prefilter_kts = max(3 * n_keyterms, 100)
+    term_text_counts = collections.Counter(term[0] for term in terms)
+    if idf:
+        mod_tfidfs = {
+            term: count * idf.get(term, 1) if ' ' not in term else count
+            for term, count in term_text_counts.items()}
+        terms_set = {
+            term for term, _
+            in sorted(mod_tfidfs.items(), key=operator.itemgetter(1), reverse=True)[:n_prefilter_kts]}
+    else:
+        terms_set = {term for term, _ in term_text_counts.most_common(n_prefilter_kts)}
+    terms = [term for term in terms if term[0] in terms_set]
 
-    # compute term weights from statistical attributes
+    # compute term weights from statistical attributes:
+    # not subsumed frequency, position of first occurrence, and num words
     term_weights = {}
-    set_terms_as_str = {terms_as_strs[id(terms)] for terms in terms}
+    seen_terms = set()
     n_toks_plus_1 = n_toks + 1
     for term in terms:
-        term_str = terms_as_strs[id(term)]
-        pos_first_occ_factor = math.log(n_toks_plus_1 / (term.start + 1))
-        # TODO: assess if len(t) puts too much emphasis on long terms
-        # alternative: term_len = 1 if ' ' not in term else math.sqrt(len(term))
-        term_len = 1 if ' ' not in term else len(term)
-        term_count = term_counts[term_str]
-        subsum_count = sum(term_counts[t2] for t2 in set_terms_as_str
-                           if t2 != term_str and term_str in t2)
-        term_freq_factor = (term_count - subsum_count)
-        if idf and ' ' not in term_str:
-            term_freq_factor *= idf[term_str]
-        term_weights[term_str] = term_freq_factor * pos_first_occ_factor * term_len
+        term_text = term[0]
+        # we only want the *first* occurrence of a unique term (by its text)
+        if term_text in seen_terms:
+            continue
+        seen_terms.add(term_text)
+        pos_first_occ_factor = math.log(n_toks_plus_1 / (term[1] + 1))
+        # TODO: assess how best to scale term len
+        term_len = math.sqrt(term[2])  # term[2]
+        term_count = term_text_counts[term_text]
+        subsum_count = sum(term_text_counts[t2] for t2 in terms_set
+                           if t2 != term_text and term_text in t2)
+        term_freq_factor = term_count - subsum_count
+        if idf and term[2] == 1:
+            term_freq_factor *= idf.get(term_text, 1)
+        term_weights[term_text] = term_freq_factor * pos_first_occ_factor * term_len
 
     # filter terms to only those with positive weights
-    terms = [term for term in terms
-             if term_weights[terms_as_strs[id(term)]] > 0]
+    terms = [term for term in terms if term_weights[term[0]] > 0]
 
-    n_coocs = defaultdict(lambda: defaultdict(int))
-    sum_logdists = defaultdict(lambda: defaultdict(float))
+    n_coocs = collections.defaultdict(lambda: collections.defaultdict(int))
+    sum_logdists = collections.defaultdict(lambda: collections.defaultdict(float))
 
     # iterate over windows
-    for start_ind in range(n_toks):
+    log_ = math.log  # localize this, for performance
+    for start_ind in compat.range_(n_toks):
         end_ind = start_ind + window_width
         window_terms = (term for term in terms
-                        if start_ind <= term.start <= end_ind)
+                        if start_ind <= term[1] <= end_ind)
         # get all token combinations within window
         for t1, t2 in itertools.combinations(window_terms, 2):
-            if t1 is t2:
-                continue
-            n_coocs[terms_as_strs[id(t1)]][terms_as_strs[id(t2)]] += 1
-            try:
-                sum_logdists[terms_as_strs[id(t1)]][terms_as_strs[id(t2)]] += \
-                    math.log(window_width / abs(t1.start - t2.start))
-            except ZeroDivisionError:  # HACK: pretend that they're 1 token apart
-                sum_logdists[terms_as_strs[id(t1)]][terms_as_strs[id(t2)]] += \
-                    math.log(window_width)
+            n_coocs[t1[0]][t2[0]] += 1
+            sum_logdists[t1[0]][t2[0]] += log_(window_width / max(abs(t1[1] - t2[1]), 1))
         if end_ind > n_toks:
             break
 
     # compute edge weights between co-occurring terms (nodes)
-    edge_weights = defaultdict(lambda: defaultdict(float))
+    edge_weights = collections.defaultdict(lambda: collections.defaultdict(float))
     for t1, t2s in sum_logdists.items():
         for t2 in t2s:
-            edge_weights[t1][t2] = (sum_logdists[t1][t2] / n_coocs[t1][t2]) * term_weights[t1] * term_weights[t2]
+            edge_weights[t1][t2] = ((1.0 + sum_logdists[t1][t2]) / n_coocs[t1][t2]) * term_weights[t1] * term_weights[t2]
     # normalize edge weights by sum of outgoing edge weights per term (node)
     norm_edge_weights = []
     for t1, t2s in edge_weights.items():
@@ -147,19 +170,20 @@ def sgrank(doc, window_width=1500, n_keyterms=10, idf=None):
     graph.add_edges_from(norm_edge_weights)
     term_ranks = nx.pagerank_scipy(graph)
 
-    if isinstance(n_keyterms, float):
-        n_keyterms = int(len(term_ranks) * n_keyterms)
-
-    return sorted(term_ranks.items(), key=itemgetter(1), reverse=True)[:n_keyterms]
+    return sorted(term_ranks.items(), key=operator.itemgetter(1, 0), reverse=True)[:n_keyterms]
 
 
-def textrank(doc, n_keyterms=10):
+def textrank(doc, normalize='lemma', n_keyterms=10):
     """
     Convenience function for calling :func:`key_terms_from_semantic_network <textacy.keyterms.key_terms_from_semantic_network>`
     with the parameter values used in the [TextRank]_ algorithm.
 
     Args:
         doc (``textacy.Doc`` or ``spacy.Doc``)
+        normalize (str or callable): if 'lemma', lemmatize terms; if 'lower',
+            lowercase terms; if None, use the form of terms as they appeared in
+            ``doc``; if a callable, must accept a ``spacy.Token`` and return a str,
+            e.g. :func:`textacy.spacier.utils.get_normalized_text()`
         n_keyterms (int or float): if int, number of top-ranked terms
             to return as keyterms; if float, must be in the open interval (0, 1),
             representing the fraction of top-ranked terms to return as keyterms
@@ -172,17 +196,21 @@ def textrank(doc, n_keyterms=10):
            order into texts. Association for Computational Linguistics.
     """
     return key_terms_from_semantic_network(
-        doc, window_width=2, edge_weighting='binary', ranking_algo='pagerank',
-        join_key_words=False, n_keyterms=n_keyterms)
+        doc, normalize=normalize, window_width=2, edge_weighting='binary',
+        ranking_algo='pagerank', join_key_words=False, n_keyterms=n_keyterms)
 
 
-def singlerank(doc, n_keyterms=10):
+def singlerank(doc, normalize='lemma', n_keyterms=10):
     """
     Convenience function for calling :func:`key_terms_from_semantic_network <textacy.keyterms.key_terms_from_semantic_network>`
     with the parameter values used in the [SingleRank]_ algorithm.
 
     Args:
         doc (``textacy.Doc`` or ``spacy.Doc``)
+        normalize (str or callable): if 'lemma', lemmatize terms; if 'lower',
+            lowercase terms; if None, use the form of terms as they appeared in
+            ``doc``; if a callable, must accept a ``spacy.Token`` and return a str,
+            e.g. :func:`textacy.spacier.utils.get_normalized_text()`
         n_keyterms (int or float): if int, number of top-ranked terms
             to return as keyterms; if float, must be in the open interval (0, 1),
             representing the fraction of top-ranked terms to return as keyterms
@@ -197,11 +225,12 @@ def singlerank(doc, n_keyterms=10):
            Posters (pp. 365-373). Association for Computational Linguistics.
     """
     return key_terms_from_semantic_network(
-        doc, window_width=10, edge_weighting='cooc_freq', ranking_algo='pagerank',
-        join_key_words=True, n_keyterms=n_keyterms)
+        doc, normalize=normalize, window_width=10, edge_weighting='cooc_freq',
+        ranking_algo='pagerank', join_key_words=True, n_keyterms=n_keyterms)
 
 
-def key_terms_from_semantic_network(doc, window_width=2, edge_weighting='binary',
+def key_terms_from_semantic_network(doc, normalize='lemma',
+                                    window_width=2, edge_weighting='binary',
                                     ranking_algo='pagerank', join_key_words=False,
                                     n_keyterms=10, **kwargs):
     """
@@ -210,6 +239,10 @@ def key_terms_from_semantic_network(doc, window_width=2, edge_weighting='binary'
 
     Args:
         doc (``textacy.Doc`` or ``spacy.Doc``)
+        normalize (str or callable): if 'lemma', lemmatize terms; if 'lower',
+            lowercase terms; if None, use the form of terms as they appeared in
+            ``doc``; if a callable, must accept a ``spacy.Token`` and return a str,
+            e.g. :func:`textacy.spacier.utils.get_normalized_text()`
         window_width (int): width of sliding window in which term
             co-occurrences are said to occur
         edge_weighting ('binary', 'cooc_freq'}): method used to
@@ -227,26 +260,43 @@ def key_terms_from_semantic_network(doc, window_width=2, edge_weighting='binary'
             scores as the joined key term's combined score
         n_keyterms (int or float): if int, number of top-ranked terms
             to return as keyterms; if float, must be in the open interval (0, 1),
-            representing the fraction of top-ranked terms to return as keyterms
+            is converted to an integer by ``round(len(doc) * n_keyterms)``
 
     Returns:
-        list((str, float)): sorted list of top ``n_keyterms`` key terms and their
-            corresponding ranking scores
+        List[Tuple[str, float]]: sorted list of top ``n_keyterms`` key terms and
+        their corresponding ranking scores
 
     Raises:
         ValueError: if ``n_keyterms`` is a float but not in (0.0, 1.0]
     """
-    word_list = [spacy_utils.normalized_str(word) for word in doc]
-    good_word_list = [spacy_utils.normalized_str(word)
-                      for word in doc
-                      if not word.is_stop and not word.is_punct and word.pos_ in {'NOUN', 'ADJ'}]
-
     if isinstance(n_keyterms, float):
         if not 0.0 < n_keyterms <= 1.0:
             raise ValueError('`n_keyterms` must be an int, or a float between 0.0 and 1.0')
-        n_keyterms = int(n_keyterms * len(set(good_word_list)))
+        n_keyterms = int(round(len(doc) * n_keyterms))
 
-    graph = terms_to_semantic_network(
+    include_pos = {'NOUN', 'PROPN', 'ADJ'}
+    if normalize == 'lemma':
+        word_list = [word.lemma_ for word in doc]
+        good_word_list = [word.lemma_ for word in doc
+                          if not word.is_stop and not word.is_punct and word.pos_ in include_pos]
+    elif normalize == 'lower':
+        word_list = [word.lower_ for word in doc]
+        good_word_list = [word.lower_ for word in doc
+                          if not word.is_stop and not word.is_punct and word.pos_ in include_pos]
+    elif not normalize:
+        word_list = [word.text for word in doc]
+        good_word_list = [word.text for word in doc
+                          if not word.is_stop and not word.is_punct and word.pos_ in include_pos]
+    else:
+        word_list = [normalize(word) for word in doc]
+        good_word_list = [normalize(word) for word in doc
+                          if not word.is_stop and not word.is_punct and word.pos_ in include_pos]
+
+    # HACK: omit empty strings, which happen as a bug in spacy as of v1.5
+    # and may well happen with ``normalize`` as a callable
+    # an empty string should never be considered a keyterm
+    good_word_list = [word for word in good_word_list if word]
+    graph = network.terms_to_semantic_network(
         good_word_list, window_width=window_width, edge_weighting=edge_weighting)
 
     # rank nodes by algorithm, and sort in descending order
@@ -262,11 +312,11 @@ def key_terms_from_semantic_network(doc, window_width=2, edge_weighting='binary'
     # bail out here if all we wanted was key *words* and not *terms*
     if join_key_words is False:
         return [(word, score) for word, score in
-                sorted(word_ranks.items(), key=itemgetter(1), reverse=True)[:n_keyterms]]
+                sorted(word_ranks.items(), key=operator.itemgetter(1), reverse=True)[:n_keyterms]]
 
     top_n = int(0.25 * len(word_ranks))
     top_word_ranks = {word: rank for word, rank in
-                      sorted(word_ranks.items(), key=itemgetter(1), reverse=True)[:top_n]}
+                      sorted(word_ranks.items(), key=operator.itemgetter(1), reverse=True)[:top_n]}
 
     # join consecutive key words into key terms
     seen_joined_key_terms = set()
@@ -280,7 +330,7 @@ def key_terms_from_semantic_network(doc, window_width=2, edge_weighting='binary'
             seen_joined_key_terms.add(term)
             joined_key_terms.append((term, sum(word_ranks[word] for word in words)))
 
-    return sorted(joined_key_terms, key=itemgetter(1), reverse=True)[:n_keyterms]
+    return sorted(joined_key_terms, key=operator.itemgetter(1, 0), reverse=True)[:n_keyterms]
 
 
 def most_discriminating_terms(terms_lists, bool_array_grp1,
@@ -304,12 +354,13 @@ def most_discriminating_terms(terms_lists, bool_array_grp1,
 
     Returns:
         List[str]: top `top_n_terms` most discriminating terms for grp1-not-grp2
+
         List[str]: top `top_n_terms` most discriminating terms for grp2-not-grp1
 
     References:
         King, Gary, Patrick Lam, and Margaret Roberts. "Computer-Assisted Keyword
-            and Document Set Discovery from Unstructured Text." (2014).
-            http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.458.1445&rep=rep1&type=pdf
+        and Document Set Discovery from Unstructured Text." (2014).
+        http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.458.1445&rep=rep1&type=pdf
     """
     alpha_grp1 = 1
     alpha_grp2 = 1
@@ -318,20 +369,21 @@ def most_discriminating_terms(terms_lists, bool_array_grp1,
     bool_array_grp1 = np.array(bool_array_grp1)
     bool_array_grp2 = np.invert(bool_array_grp1)
 
-    dtm, id2term = vsm.doc_term_matrix(
-        terms_lists, weighting='tf', normalize=False,
-        sublinear_tf=False, smooth_idf=True,
-        min_df=3, max_df=0.95, min_ic=0.0, max_n_terms=max_n_terms)
+    vectorizer = vsm.Vectorizer(
+        tf_type='linear', norm=None, idf_type='smooth',
+        min_df=3, max_df=0.95, max_n_terms=max_n_terms)
+    dtm = vectorizer.fit_transform(terms_lists)
+    id2term = vectorizer.id_to_term
 
     # get doc freqs for all terms in grp1 documents
     dtm_grp1 = dtm[bool_array_grp1, :]
     n_docs_grp1 = dtm_grp1.shape[0]
-    doc_freqs_grp1 = vsm.get_doc_freqs(dtm_grp1, normalized=False)
+    doc_freqs_grp1 = vsm.get_doc_freqs(dtm_grp1)
 
     # get doc freqs for all terms in grp2 documents
     dtm_grp2 = dtm[bool_array_grp2, :]
     n_docs_grp2 = dtm_grp2.shape[0]
-    doc_freqs_grp2 = vsm.get_doc_freqs(dtm_grp2, normalized=False)
+    doc_freqs_grp2 = vsm.get_doc_freqs(dtm_grp2)
 
     # get terms that occur in a larger fraction of grp1 docs than grp2 docs
     term_ids_grp1 = np.where(doc_freqs_grp1 / n_docs_grp1 > doc_freqs_grp2 / n_docs_grp2)[0]
@@ -363,7 +415,7 @@ def most_discriminating_terms(terms_lists, bool_array_grp1,
         grp1_terms_likelihoods[id2term[term_id]] = term1 * term2
     top_grp1_terms = [term for term, likelihood
                       in sorted(grp1_terms_likelihoods.items(),
-                                key=itemgetter(1), reverse=True)[:top_n_terms]]
+                                key=operator.itemgetter(1), reverse=True)[:top_n_terms]]
 
     # get grp2 terms likelihoods, then sort for most discriminating grp2-not-grp1 terms
     grp2_terms_likelihoods = {}
@@ -373,7 +425,7 @@ def most_discriminating_terms(terms_lists, bool_array_grp1,
         grp2_terms_likelihoods[id2term[term_id]] = term1 * term2
     top_grp2_terms = [term for term, likelihood
                       in sorted(grp2_terms_likelihoods.items(),
-                                key=itemgetter(1), reverse=True)[:top_n_terms]]
+                                key=operator.itemgetter(1), reverse=True)[:top_n_terms]]
 
     return (top_grp1_terms, top_grp2_terms)
 
@@ -391,8 +443,7 @@ def aggregate_term_variants(terms,
             aggregated with their definitions and terms that are definitions will
             be aggregated with their acronyms
         fuzzy_dedupe (bool): if True, fuzzy string matching will be used
-            to aggregate similar terms of a sufficient length using
-            `FuzzyWuzzy <https://pypi.python.org/pypi/fuzzywuzzy>`_
+            to aggregate similar terms of a sufficient length
 
     Returns:
         List[Set[str]]: each item is a set of aggregated terms
@@ -473,13 +524,13 @@ def aggregate_term_variants(terms,
                     variants.add(variant)
                     seen_terms.add(variant)
 
-        # intense de-duping via fuzzywuzzy for sufficiently long terms
+        # intense de-duping for sufficiently long terms
         if fuzzy_dedupe is True and len(term) >= 13:
             for other_term in sorted(terms.difference(seen_terms), key=len, reverse=True):
                 if len(other_term) < 13:
                     break
-                tsr = token_sort_ratio(term, other_term)
-                if tsr > 93:
+                tsr = similarity.token_sort_ratio(term, other_term)
+                if tsr > 0.93:
                     variants.add(other_term)
                     seen_terms.add(other_term)
                     break
@@ -505,7 +556,7 @@ def rank_nodes_by_bestcoverage(graph, k, c=1, alpha=1.0):
 
     Returns:
         dict: top ``k`` nodes as ranked by bestcoverage algorithm; keys as node
-            identifiers, values as corresponding ranking scores
+        identifiers, values as corresponding ranking scores
 
     References:
         .. [BestCoverage] Küçüktunç, O., Saule, E., Kaya, K., & Çatalyürek, Ü. V.
@@ -516,13 +567,13 @@ def rank_nodes_by_bestcoverage(graph, k, c=1, alpha=1.0):
     """
     alpha = float(alpha)
 
-    nodes_list = graph.nodes()
+    nodes_list = list(dict(graph.nodes()))
 
     # ranks: array of PageRank values, summing up to 1
     ranks = nx.pagerank_scipy(graph, alpha=0.85, max_iter=100, tol=1e-08, weight='weight')
-    sorted_ranks = sorted(ranks.items(), key=itemgetter(1), reverse=True)
+    sorted_ranks = sorted(ranks.items(), key=operator.itemgetter(1), reverse=True)
 
-    avg_degree = sum(deg for _, deg in graph.degree_iter()) / len(nodes_list)
+    avg_degree = sum(deg for _, deg in graph.degree()) / len(nodes_list)
     # relaxation parameter, k' in the paper
     k_prime = int(k * avg_degree * c)
 
@@ -541,7 +592,7 @@ def rank_nodes_by_bestcoverage(graph, k, c=1, alpha=1.0):
         s = set(vertices)
         # s.update(vertices)
         # for each step
-        for _ in range(l):
+        for _ in compat.range_(l):
             # for each node
             next_vertices = []
             for vertex in vertices:
@@ -555,7 +606,7 @@ def rank_nodes_by_bestcoverage(graph, k, c=1, alpha=1.0):
     top_k_exp_vertices = get_l_step_expanded_set([item[0] for item in top_k_sorted_ranks], c)
 
     # compute initial exprel contribution
-    taken = defaultdict(bool)
+    taken = collections.defaultdict(bool)
     contrib = {}
     for vertex in nodes_list:
         # get l-step expanded set
@@ -566,11 +617,11 @@ def rank_nodes_by_bestcoverage(graph, k, c=1, alpha=1.0):
     sum_contrib = 0.0
     results = {}
     # greedily select to maximize exprel metric
-    for _ in range(k):
+    for _ in compat.range_(k):
         if not contrib:  # TODO: check that .items(): not needed
             break
         # find word with highest l-step expanded relevance score
-        max_word_score = sorted(contrib.items(), key=itemgetter(1), reverse=True)[0]
+        max_word_score = sorted(contrib.items(), key=operator.itemgetter(1), reverse=True)[0]
         sum_contrib += max_word_score[1]  # contrib[max_word[0]]
         results[max_word_score[0]] = max_word_score[1]
         # find its l-step expanded set
@@ -586,7 +637,8 @@ def rank_nodes_by_bestcoverage(graph, k, c=1, alpha=1.0):
                 try:
                     contrib[w] -= alpha * ranks[vertex]
                 except KeyError:
-                    print('***ERROR: word', w, 'not in contrib dict! We\'re approximating...')
+                    LOGGER.error(
+                        'Word %s not in contrib dict! We\'re approximating...', w)
             taken[vertex] = True
         contrib[max_word_score[0]] = 0
 
@@ -617,7 +669,7 @@ def rank_nodes_by_divrank(graph, r=None, lambda_=0.5, alpha=0.5):
     """
     # check function arguments
     if len(graph) == 0:
-        print('**WARNING: Graph graph is empty!')
+        LOGGER.warning('``graph`` is empty!')
         return {}
 
     # create adjacency matrix, i.e.
@@ -659,10 +711,10 @@ def rank_nodes_by_divrank(graph, r=None, lambda_=0.5, alpha=0.5):
 
     # sort nodes by divrank score
     results = sorted(((i, score) for i, score in enumerate(pr.flatten().tolist())),
-                     key=itemgetter(1), reverse=True)
+                     key=operator.itemgetter(1), reverse=True)
 
     # replace node number by node value
-    nodes_list = graph.nodes()
+    nodes_list = list(dict(graph.nodes()))
     divranks = {nodes_list[result[0]]: result[1] for result in results}
 
     return divranks

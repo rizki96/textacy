@@ -1,29 +1,25 @@
 # -*- coding: utf-8 -*-
 """
 Functions to extract various elements of interest from documents already parsed
-by `spaCy <http://spacy.io/>`_, such as n-grams, named entities, subject-verb-object
-triples, and acronyms.
+by spaCy, such as n-grams, named entities, subject-verb-object triples, and
+acronyms.
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from collections import defaultdict
-from itertools import takewhile
-from operator import itemgetter
+import collections
+import itertools
+import operator
 import re
 
+import numpy as np
 from cytoolz import itertoolz
-from numpy import nanmin, nanmax, zeros, NaN
 from spacy.parts_of_speech import CONJ, DET, NOUN, VERB
 from spacy.tokens.span import Span as SpacySpan
 
-import textacy
-from textacy import spacy_utils, text_utils
-from textacy.compat import unicode_type
-from textacy.spacy_utils import (normalized_str, get_main_verbs_of_sent,
-                                 get_subjects_of_verb, get_objects_of_verb,
-                                 get_span_for_compound_noun,
-                                 get_span_for_verb_auxiliaries)
-from textacy.constants import NUMERIC_NE_TYPES, REPORTING_VERBS
+from . import compat
+from . import constants
+from . import text_utils
+from .spacier import utils as spacy_utils
 
 
 def words(doc,
@@ -43,19 +39,20 @@ def words(doc,
             IS NOT included in this param
         exclude_pos (str or Set[str]): remove words whose part-of-speech tag
             IS in the specified tags
-        min_freq (int): remove words that occur in `doc` fewer than
-            `min_freq` times
+        min_freq (int): remove words that occur in ``doc`` fewer than
+            ``min_freq`` times
 
     Yields:
         ``spacy.Token``: the next token from ``doc`` passing specified filters
-            in order of appearance in the document
+        in order of appearance in the document
 
     Raises:
-        TypeError: if `include_pos` or `exclude_pos` is not a str, a set of str,
+        TypeError: if ``include_pos`` or ``exclude_pos`` is not a str, a set of str,
             or a falsy value
 
-    .. note:: Filtering by part-of-speech tag uses the universal POS tag set,
-        http://universaldependencies.org/u/pos/
+    Note:
+        Filtering by part-of-speech tag uses the universal POS tag set; for details,
+        check spaCy's docs: https://spacy.io/api/annotation#pos-tagging
     """
     words_ = (w for w in doc if not w.is_space)
     if filter_stops is True:
@@ -65,7 +62,7 @@ def words(doc,
     if filter_nums is True:
         words_ = (w for w in words_ if not w.like_num)
     if include_pos:
-        if isinstance(include_pos, unicode_type):
+        if isinstance(include_pos, compat.unicode_):
             include_pos = include_pos.upper()
             words_ = (w for w in words_ if w.pos_ == include_pos)
         elif isinstance(include_pos, (set, frozenset, list, tuple)):
@@ -75,7 +72,7 @@ def words(doc,
             msg = 'invalid `include_pos` type: "{}"'.format(type(include_pos))
             raise TypeError(msg)
     if exclude_pos:
-        if isinstance(exclude_pos, unicode_type):
+        if isinstance(exclude_pos, compat.unicode_):
             exclude_pos = exclude_pos.upper()
             words_ = (w for w in words_ if w.pos_ != exclude_pos)
         elif isinstance(exclude_pos, (set, frozenset, list, tuple)):
@@ -86,9 +83,9 @@ def words(doc,
             raise TypeError(msg)
     if min_freq > 1:
         words_ = list(words_)
-        freqs = itertoolz.frequencies(normalized_str(w) for w in words_)
+        freqs = itertoolz.frequencies(w.lower_ for w in words_)
         words_ = (w for w in words_
-                  if freqs[normalized_str(w)] >= min_freq)
+                  if freqs[w.lower_] >= min_freq)
 
     for word in words_:
         yield word
@@ -115,26 +112,27 @@ def ngrams(doc, n,
             tokens' part-of-speech tags ARE NOT included in this param
         exclude_pos (str or Set[str]): remove ngrams if any of their constituent
             tokens' part-of-speech tags ARE included in this param
-        min_freq (int, optional): remove ngrams that occur in `doc` fewer than
-            `min_freq` times
+        min_freq (int): remove ngrams that occur in ``doc`` fewer than
+            ``min_freq`` times
 
     Yields:
         ``spacy.Span``: the next ngram from ``doc`` passing all specified
-            filters, in order of appearance in the document
+        filters, in order of appearance in the document
 
     Raises:
         ValueError: if ``n`` < 1
-        TypeError: if `include_pos` or `exclude_pos` is not a str, a set of str,
+        TypeError: if ``include_pos`` or ``exclude_pos`` is not a str, a set of str,
             or a falsy value
 
-    .. note:: Filtering by part-of-speech tag uses the universal POS tag set,
-        http://universaldependencies.org/u/pos/
+    Note:
+        Filtering by part-of-speech tag uses the universal POS tag set; for details,
+        check spaCy's docs: https://spacy.io/api/annotation#pos-tagging
     """
     if n < 1:
         raise ValueError('n must be greater than or equal to 1')
 
     ngrams_ = (doc[i: i + n]
-               for i in range(len(doc) - n + 1))
+               for i in compat.range_(len(doc) - n + 1))
     ngrams_ = (ngram for ngram in ngrams_
                if not any(w.is_space for w in ngram))
     if filter_stops is True:
@@ -147,7 +145,7 @@ def ngrams(doc, n,
         ngrams_ = (ngram for ngram in ngrams_
                    if not any(w.like_num for w in ngram))
     if include_pos:
-        if isinstance(include_pos, unicode_type):
+        if isinstance(include_pos, compat.unicode_):
             include_pos = include_pos.upper()
             ngrams_ = (ngram for ngram in ngrams_
                        if all(w.pos_ == include_pos for w in ngram))
@@ -159,7 +157,7 @@ def ngrams(doc, n,
             msg = 'invalid `include_pos` type: "{}"'.format(type(include_pos))
             raise TypeError(msg)
     if exclude_pos:
-        if isinstance(exclude_pos, unicode_type):
+        if isinstance(exclude_pos, compat.unicode_):
             exclude_pos = exclude_pos.upper()
             ngrams_ = (ngram for ngram in ngrams_
                        if all(w.pos_ != exclude_pos for w in ngram))
@@ -172,9 +170,9 @@ def ngrams(doc, n,
             raise TypeError(msg)
     if min_freq > 1:
         ngrams_ = list(ngrams_)
-        freqs = itertoolz.frequencies(normalized_str(ngram) for ngram in ngrams_)
+        freqs = itertoolz.frequencies(ngram.lower_ for ngram in ngrams_)
         ngrams_ = (ngram for ngram in ngrams_
-                   if freqs[normalized_str(ngram)] >= min_freq)
+                   if freqs[ngram.lower_] >= min_freq)
 
     for ngram in ngrams_:
         yield ngram
@@ -195,28 +193,37 @@ def named_entities(doc,
         exclude_types (str or Set[str]): remove named entities whose type IS
             in this param; if "NUMERIC", all numeric entity types ("DATE",
             "MONEY", "ORDINAL", etc.) are excluded
-        drop_determiners (bool): remove leading determiners (e.g. "the")
-            from named entities (e.g. "the United States" => "United States")
-        min_freq (int): remove named entities that occur in `doc` fewer
-            than `min_freq` times
+        drop_determiners (bool): Remove leading determiners (e.g. "the")
+            from named entities (e.g. "the United States" => "United States").
+
+            .. note:: Entities from which a leading determiner has been removed
+               are, effectively, *new* entities, and not saved to the ``SpacyDoc``
+               from which they came. This is irritating but unavoidable, since
+               this function is not meant to have side-effects on document state.
+               If you're only using the text of the returned spans, this is no
+               big deal, but watch out if you're counting on determiner-less
+               entities associated with the doc downstream.
+
+        min_freq (int): remove named entities that occur in ``doc`` fewer
+            than ``min_freq`` times
 
     Yields:
         ``spacy.Span``: the next named entity from ``doc`` passing all specified
-            filters in order of appearance in the document
+        filters in order of appearance in the document
 
-    Raise:
-        TypeError: if `include_types` or `exclude_types` is not a str, a set of
+    Raises:
+        TypeError: if ``include_types`` or ``exclude_types`` is not a str, a set of
             str, or a falsy value
     """
-    if isinstance(doc, textacy.Doc):
+    if hasattr(doc, 'spacy_doc'):
         nes = doc.spacy_doc.ents
     else:
         nes = doc.ents
     if include_types:
-        if isinstance(include_types, unicode_type):
+        if isinstance(include_types, compat.unicode_):
             include_types = include_types.upper()
             if include_types == 'NUMERIC':
-                include_types = NUMERIC_NE_TYPES  # we now go to next if block
+                include_types = constants.NUMERIC_NE_TYPES  # we now go to next if block
             else:
                 nes = (ne for ne in nes if ne.label_ == include_types)
         if isinstance(include_types, (set, frozenset, list, tuple)):
@@ -226,10 +233,10 @@ def named_entities(doc,
             msg = 'invalid `include_types` type: "{}"'.format(type(include_types))
             raise TypeError(msg)
     if exclude_types:
-        if isinstance(exclude_types, unicode_type):
+        if isinstance(exclude_types, compat.unicode_):
             exclude_types = exclude_types.upper()
             if exclude_types == 'NUMERIC':
-                exclude_types = NUMERIC_NE_TYPES  # we now go to next if block
+                exclude_types = constants.NUMERIC_NE_TYPES  # we now go to next if block
             else:
                 nes = (ne for ne in nes if ne.label_ != exclude_types)
         if isinstance(exclude_types, (set, frozenset, list, tuple)):
@@ -239,12 +246,14 @@ def named_entities(doc,
             msg = 'invalid `exclude_types` type: "{}"'.format(type(exclude_types))
             raise TypeError(msg)
     if drop_determiners is True:
-        nes = (ne if ne[0].pos != DET else ne[1:] for ne in nes)
+        nes = (
+            ne if ne[0].pos != DET else SpacySpan(ne.doc, ne.start + 1, ne.end, label=ne.label, vector=ne.vector)
+            for ne in nes)
     if min_freq > 1:
         nes = list(nes)
-        freqs = itertoolz.frequencies(ne.text for ne in nes)
+        freqs = itertoolz.frequencies(ne.lower_ for ne in nes)
         nes = (ne for ne in nes
-               if freqs[ne.text] >= min_freq)
+               if freqs[ne.lower_] >= min_freq)
 
     for ne in nes:
         yield ne
@@ -259,14 +268,14 @@ def noun_chunks(doc, drop_determiners=True, min_freq=1):
         doc (``textacy.Doc`` or ``spacy.Doc``)
         drop_determiners (bool): remove leading determiners (e.g. "the")
             from phrases (e.g. "the quick brown fox" => "quick brown fox")
-        min_freq (int): remove chunks that occur in `doc` fewer than
-            `min_freq` times
+        min_freq (int): remove chunks that occur in ``doc`` fewer than
+            ``min_freq`` times
 
     Yields:
         ``spacy.Span``: the next noun chunk from ``doc`` in order of appearance
-             in the document
+        in the document
     """
-    if isinstance(doc, textacy.Doc):
+    if hasattr(doc, 'spacy_doc'):
         ncs = doc.spacy_doc.noun_chunks
     else:
         ncs = doc.noun_chunks
@@ -275,9 +284,9 @@ def noun_chunks(doc, drop_determiners=True, min_freq=1):
                for nc in ncs)
     if min_freq > 1:
         ncs = list(ncs)
-        freqs = itertoolz.frequencies(normalized_str(nc) for nc in ncs)
+        freqs = itertoolz.frequencies(nc.lower_ for nc in ncs)
         ncs = (nc for nc in ncs
-               if freqs[normalized_str(nc)] >= min_freq)
+               if freqs[nc.lower_] >= min_freq)
 
     for nc in ncs:
         yield nc
@@ -306,7 +315,7 @@ def pos_regex_matches(doc, pattern):
 
     Yields:
         ``spacy.Span``: the next span of consecutive tokens from ``doc`` whose
-            parts-of-speech match ``pattern``, in order of apperance
+        parts-of-speech match ``pattern``, in order of apperance
     """
     # standardize and transform the regular expression pattern...
     pattern = re.sub(r'\s', '', pattern)
@@ -328,9 +337,9 @@ def subject_verb_object_triples(doc):
         doc (``textacy.Doc`` or ``spacy.Doc`` or ``spacy.Span``)
 
     Yields:
-        Tuple[``spacy.Span``, ``spacy.Span``, ``spacy.Span``]: the next 3-tuple
-            of spans from ``doc`` representing a (subject, verb, object) triple,
-            in order of appearance
+        Tuple[``spacy.Span``, ``spacy.Span``, ``spacy.Span``]: The next 3-tuple
+        of spans from ``doc`` representing a (subject, verb, object) triple,
+        in order of appearance.
     """
     # TODO: What to do about questions, where it may be VSO instead of SVO?
     # TODO: What about non-adjacent verb negations?
@@ -343,26 +352,26 @@ def subject_verb_object_triples(doc):
     for sent in sents:
         start_i = sent[0].i
 
-        verbs = get_main_verbs_of_sent(sent)
+        verbs = spacy_utils.get_main_verbs_of_sent(sent)
         for verb in verbs:
-            subjs = get_subjects_of_verb(verb)
+            subjs = spacy_utils.get_subjects_of_verb(verb)
             if not subjs:
                 continue
-            objs = get_objects_of_verb(verb)
+            objs = spacy_utils.get_objects_of_verb(verb)
             if not objs:
                 continue
 
             # add adjacent auxiliaries to verbs, for context
             # and add compounds to compound nouns
-            verb_span = get_span_for_verb_auxiliaries(verb)
+            verb_span = spacy_utils.get_span_for_verb_auxiliaries(verb)
             verb = sent[verb_span[0] - start_i: verb_span[1] - start_i + 1]
             for subj in subjs:
-                subj = sent[get_span_for_compound_noun(subj)[0] - start_i: subj.i - start_i + 1]
+                subj = sent[spacy_utils.get_span_for_compound_noun(subj)[0] - start_i: subj.i - start_i + 1]
                 for obj in objs:
                     if obj.pos == NOUN:
-                        span = get_span_for_compound_noun(obj)
+                        span = spacy_utils.get_span_for_compound_noun(obj)
                     elif obj.pos == VERB:
-                        span = get_span_for_verb_auxiliaries(obj)
+                        span = spacy_utils.get_span_for_verb_auxiliaries(obj)
                     else:
                         span = (obj.i, obj.i)
                     obj = sent[span[0] - start_i: span[1] - start_i + 1]
@@ -378,7 +387,7 @@ def acronyms_and_definitions(doc, known_acro_defs=None):
 
     Args:
         doc (``textacy.Doc`` or ``spacy.Doc`` or ``spacy.Span``)
-        known_acro_defs (dict, optional): if certain acronym/definition pairs
+        known_acro_defs (dict): if certain acronym/definition pairs
             are known, pass them in as {acronym (str): definition (str)};
             algorithm will not attempt to find new definitions
 
@@ -387,16 +396,15 @@ def acronyms_and_definitions(doc, known_acro_defs=None):
 
     References:
         Taghva, Kazem, and Jeff Gilbreth. "Recognizing acronyms and their definitions."
-            International Journal on Document Analysis and Recognition 1.4 (1999): 191-198.
+        International Journal on Document Analysis and Recognition 1.4 (1999): 191-198.
     """
     # process function arguments
-    acro_defs = defaultdict(list)
+    acro_defs = collections.defaultdict(list)
     if not known_acro_defs:
         known_acronyms = set()
     else:
-        for acro, defs in known_acro_defs.items():
-            if not isinstance(defs, list):
-                acro_defs[acro] = [defs]
+        for acro, def_ in known_acro_defs.items():
+            acro_defs[acro] = [(def_, 1.0)]
         known_acronyms = set(acro_defs.keys())
 
     if isinstance(doc, SpacySpan):
@@ -453,7 +461,7 @@ def acronyms_and_definitions(doc, known_acro_defs=None):
         if len(defs) == 1:
             acro_defs[acro] = defs[0][0]
         else:
-            acro_defs[acro] = sorted(defs, key=itemgetter(1), reverse=True)[0][0]
+            acro_defs[acro] = sorted(defs, key=operator.itemgetter(1), reverse=True)[0][0]
 
     return dict(acro_defs)
 
@@ -466,24 +474,24 @@ def _get_acronym_definition(acronym, window, threshold=0.8):
         acronym (str): acronym for which definition is sought
         window (``spacy.Span``): a span of tokens from which definition
             extraction will be attempted
-        threshold (float, optional): minimum "confidence" in definition required
+        threshold (float): minimum "confidence" in definition required
             for acceptance; valid values in [0.0, 1.0]; higher value => stricter threshold
 
     Returns:
         Tuple[str, float]: most likely definition for given acronym ('' if none found),
-            along with the confidence assigned to it
+        along with the confidence assigned to it
 
     References:
         Taghva, Kazem, and Jeff Gilbreth. "Recognizing acronyms and their definitions."
-            International Journal on Document Analysis and Recognition 1.4 (1999): 191-198.
+        International Journal on Document Analysis and Recognition 1.4 (1999): 191-198.
     """
     def build_lcs_matrix(X, Y):
         m = len(X)
         n = len(Y)
-        b = zeros((m, n), dtype=int)
-        c = zeros((m, n), dtype=int)
-        for i in range(0, m):
-            for j in range(0, n):
+        b = np.zeros((m, n), dtype=int)
+        c = np.zeros((m, n), dtype=int)
+        for i in compat.range_(0, m):
+            for j in compat.range_(0, n):
                 if X[i] == Y[j]:
                     c[i, j] = c[i - 1, j - 1] + 1
                     b[i, j] = 1
@@ -496,13 +504,13 @@ def _get_acronym_definition(acronym, window, threshold=0.8):
     def parse_lcs_matrix(b, start_i, start_j, lcs_length, stack, vectors):
         m = b.shape[0]
         n = b.shape[1]
-        for i in range(start_i, m):
-            for j in range(start_j, n):
+        for i in compat.range_(start_i, m):
+            for j in compat.range_(start_j, n):
                 if b[i, j] == 1:
                     s = (i, j)
                     stack.append(s)
                     if lcs_length == 1:
-                        vec = [NaN] * n
+                        vec = [np.NaN] * n
                         for k, l in stack:
                             vec[l] = k
                         vectors.append(vec)
@@ -513,13 +521,13 @@ def _get_acronym_definition(acronym, window, threshold=0.8):
 
     def vector_values(v, types):
         vv = {}
-        first = v.index(int(nanmin(v)))
-        last = v.index(int(nanmax(v)))
+        first = v.index(int(np.nanmin(v)))
+        last = v.index(int(np.nanmax(v)))
         vv['size'] = (last - first) + 1
         vv['distance'] = len(v) - last
         vv['stop_count'] = 0
         vv['misses'] = 0
-        for i in range(first, last + 1):
+        for i in compat.range_(first, last + 1):
             if v[i] >= 0 and types[i] == 's':
                 vv['stop_count'] += 1
             elif v[i] is None and types[i] not in ['s', 'h']:
@@ -566,7 +574,7 @@ def _get_acronym_definition(acronym, window, threshold=0.8):
         elif '-' in tok_text and not tok_text.startswith('-'):
             tok_split = [t[0] for t in tok_text.split('-') if t]
             def_leads.extend(tok_split)
-            def_types.extend('H' if i == 0 else 'h' for i in range(len(tok_split)))
+            def_types.extend('H' if i == 0 else 'h' for i in compat.range_(len(tok_split)))
         else:
             def_leads.append(tok_text[0])
             def_types.append('w')
@@ -602,8 +610,8 @@ def _get_acronym_definition(acronym, window, threshold=0.8):
     for vec in vecs[1:]:
         best_vec = compare_vectors(best_vec, vec, def_types)
 
-    first = best_vec.index(int(nanmin(best_vec)))
-    last = best_vec.index(int(nanmax(best_vec)))
+    first = best_vec.index(int(np.nanmin(best_vec)))
+    last = best_vec.index(int(np.nanmax(best_vec)))
 
     definition = window[first: last + 1].text
     if len(definition.split()) == 1:
@@ -622,15 +630,15 @@ def semistructured_statements(doc, entity, cue='be', ignore_entity_case=True,
         doc (``textacy.Doc`` or ``spacy.Doc``)
         entity (str): a noun or noun phrase of some sort (e.g. "President Obama",
             "global warming", "Python")
-        cue (str, optional): verb lemma with which `entity` is associated
+        cue (str): verb lemma with which ``entity`` is associated
             (e.g. "talk about", "have", "write")
-        ignore_entity_case (bool, optional): if True, entity matching is case-independent
-        min_n_words (int, optional): min number of tokens allowed in a matching fragment
-        max_n_words (int, optional): max number of tokens allowed in a matching fragment
+        ignore_entity_case (bool): if True, entity matching is case-independent
+        min_n_words (int): min number of tokens allowed in a matching fragment
+        max_n_words (int): max number of tokens allowed in a matching fragment
 
     Yields:
         (``spacy.Span`` or ``spacy.Token``, ``spacy.Span`` or ``spacy.Token``, ``spacy.Span``):
-              where each element is a matching (entity, cue, fragment) triple
+        where each element is a matching (entity, cue, fragment) triple
 
     Notes:
         Inspired by N. Diakopoulos, A. Zhang, A. Salway. Visual Analytics of
@@ -696,12 +704,12 @@ def semistructured_statements(doc, entity, cue='be', ignore_entity_case=True,
 
             # now add adjacent auxiliary and negating tokens to the cue, for context
             try:
-                min_cue_i = min(left.i for left in takewhile(
+                min_cue_i = min(left.i for left in itertools.takewhile(
                     lambda x: x.dep_ in {'aux', 'neg'}, reversed(list(the_cue.lefts))))
             except ValueError:
                 pass
             try:
-                max_cue_i = max(right.i for right in takewhile(
+                max_cue_i = max(right.i for right in itertools.takewhile(
                     lambda x: x.dep_ in {'aux', 'neg'}, the_cue.rights))
             except ValueError:
                 pass
@@ -739,7 +747,7 @@ def direct_quotations(doc):
 
     Yields:
         (``spacy.Span``, ``spacy.Token``, ``spacy.Span``): next quotation in ``doc``
-            represented as a (speaker, reporting verb, quotation) 3-tuple
+        represented as a (speaker, reporting verb, quotation) 3-tuple
 
     Notes:
         Loosely inspired by Krestel, Bergler, Witte. "Minding the Source: Automatic
@@ -747,13 +755,16 @@ def direct_quotations(doc):
 
     TODO: Better approach would use ML, but needs a training dataset.
     """
-    if isinstance(doc, textacy.Doc):
-        if doc.lang != 'en':
-            raise NotImplementedError('sorry, English-language texts only :(')
+    if hasattr(doc, 'spacy_doc'):
+        doc_lang = doc.lang
         doc = doc.spacy_doc
+    else:
+        doc_lang = doc.vocab.lang
+    if doc_lang != 'en':
+        raise NotImplementedError('sorry, English-language texts only :(')
     quote_end_punct = {',', '.', '?', '!'}
     quote_indexes = set(itertoolz.concat(
-        (m.start(), m.end() - 1) for m in re.finditer(r"(\".*?\")|(''.*?'')|(``.*?'')", doc.string)))
+        (m.start(), m.end() - 1) for m in re.finditer(r"(\".*?\")|(''.*?'')|(``.*?'')", doc.text)))
     quote_positions = list(itertoolz.partition(
         2, sorted(tok.i for tok in doc if tok.idx in quote_indexes)))
     sents = list(doc.sents)
@@ -781,7 +792,7 @@ def direct_quotations(doc):
             # get any reporting verbs
             rvs = [tok for tok in sent
                    if spacy_utils.preserve_case(tok) is False and
-                   tok.lemma_ in REPORTING_VERBS and
+                   tok.lemma_ in constants.REPORTING_VERBS and
                    tok.pos_ == 'VERB' and
                    not any(oq0 <= tok.i <= oq1 for oq0, oq1 in quote_positions)]
 
@@ -804,7 +815,7 @@ def direct_quotations(doc):
 
             try:
                 # rv_subj = _find_subjects(rv)[0]
-                rv_subj = get_subjects_of_verb(rv)[0]
+                rv_subj = spacy_utils.get_subjects_of_verb(rv)[0]
             except IndexError:
                 continue
     #         if rv_subj.text in {'he', 'she'}:
@@ -814,7 +825,7 @@ def direct_quotations(doc):
     #                 else:
     #                     break
     #         else:
-            span = get_span_for_compound_noun(rv_subj)
+            span = spacy_utils.get_span_for_compound_noun(rv_subj)
             speaker = doc[span[0]: span[1] + 1]
 
             yield (speaker, rv, quote)

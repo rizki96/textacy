@@ -1,46 +1,39 @@
 from __future__ import absolute_import, unicode_literals
 
 import numpy as np
-import unittest
-
+import pytest
 from spacy import attrs
 
-from textacy import data, export
+from textacy import cache, export
 
 
-class ExportTestCase(unittest.TestCase):
+@pytest.fixture(scope='module')
+def spacy_doc():
+    text = "I would have lived in peace. But my enemies brought me war."
+    spacy_lang = cache.load_spacy('en')
+    spacy_doc = spacy_lang(text)
+    cols = [attrs.TAG, attrs.HEAD, attrs.DEP]
+    values = np.array(
+        [[13656873538139661788, 3, 426],
+         [16235386156175103506, 2, 402],
+         [14200088355797579614, 1, 402],
+         [3822385049556375858, 0, 8206900633647566924],
+         [1292078113972184607, 18446744073709551615, 440],
+         [15308085513773655218, 18446744073709551615, 436],
+         [12646065887601541794, 18446744073709551613, 442],
+         [17571114184892886314, 3, 404],
+         [4062917326063685704, 1, 437],
+         [783433942507015291, 1, 426],
+         [17109001835818727656, 0, 8206900633647566924],
+         [13656873538139661788, 18446744073709551615, 3965108062993911700],
+         [15308085513773655218, 18446744073709551614, 413],
+         [12646065887601541794, 18446744073709551613, 442]],
+        dtype='uint64')
+    spacy_doc.from_array(cols, values)
+    return spacy_doc
 
-    def setUp(self):
-        text = "I would have lived in peace. But my enemies brought me war."
-        # we're not loading all models for speed; instead, we're updating the doc
-        # with pre-computed part-of-speech tagging and parsing values
-        spacy_pipeline = data.load_spacy('en')
-        self.spacy_doc = spacy_pipeline(text)
-        cols = [attrs.TAG, attrs.HEAD, attrs.DEP]
-        values = np.array(
-            [[445, 3, 393], [437, 2, 370], [454, 1, 370], [457, 0, 53503],
-             [432, -1, 405], [440, -1, 401], [419, -3, 407], [424, 3, 372],
-             [446, 1, 402], [443, 1, 393], [455, 0, 53503], [445, -1, 93815],
-             [440, -2, 380], [419, -3, 407]], dtype='int32')
-        self.spacy_doc.from_array(cols, values)
 
-    def test_doc_to_gensim(self):
-        expected_gdoc = [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)]
-        expected_gdict = {0: 'peace', 1: 'enemy', 2: 'war', 3: 'live', 4: 'bring'}
-        observed_gdict, observed_gdoc = export.doc_to_gensim(
-            self.spacy_doc, lemmatize=True,
-            filter_stops=True, filter_punct=True, filter_nums=False)
-        observed_gdict = dict(observed_gdict)
-
-        self.assertEqual(len(observed_gdoc), len(expected_gdoc))
-        self.assertEqual(len(observed_gdict), len(expected_gdict))
-        # ensure counts are the same for each unique token
-        for exp_tok_id, exp_tok_str in expected_gdict.items():
-            obs_tok_id = [tok_id for tok_id, tok_str in observed_gdict.items()
-                          if tok_str == exp_tok_str][0]
-            self.assertEqual(observed_gdoc[obs_tok_id][1], expected_gdoc[exp_tok_id][1])
-
-    def test_write_conll(self):
-        expected = '# sent_id 1\n1\tI\ti\tPRON\tPRP\t_\t4\tnsubj\t_\t_\n2\twould\twould\tVERB\tMD\t_\t4\taux\t_\t_\n3\thave\thave\tVERB\tVB\t_\t4\taux\t_\t_\n4\tlived\tlive\tVERB\tVBN\t_\t0\troot\t_\t_\n5\tin\tin\tADP\tIN\t_\t4\tprep\t_\t_\n6\tpeace\tpeace\tNOUN\tNN\t_\t5\tpobj\t_\tSpaceAfter=No\n7\t.\t.\tPUNCT\t.\t_\t4\tpunct\t_\t_\n\n# sent_id 2\n1\tBut\tbut\tCONJ\tCC\t_\t4\tcc\t_\t_\n2\tmy\tmy\tADJ\tPRP$\t_\t3\tposs\t_\t_\n3\tenemies\tenemy\tNOUN\tNNS\t_\t4\tnsubj\t_\t_\n4\tbrought\tbring\tVERB\tVBD\t_\t0\troot\t_\t_\n5\tme\tme\tPRON\tPRP\t_\t4\tdative\t_\t_\n6\twar\twar\tNOUN\tNN\t_\t4\tdobj\t_\tSpaceAfter=No\n7\t.\t.\tPUNCT\t.\t_\t4\tpunct\t_\tSpaceAfter=No\n'
-        observed = export.doc_to_conll(self.spacy_doc)
-        self.assertEqual(observed, expected)
+def test_write_conll(spacy_doc):
+    expected = '# sent_id 1\n1\tI\t-PRON-\tPRON\tPRP\t_\t4\tnsubj\t_\t_\n2\twould\twould\tVERB\tMD\t_\t4\taux\t_\t_\n3\thave\thave\tVERB\tVB\t_\t4\taux\t_\t_\n4\tlived\tlive\tVERB\tVBN\t_\t0\troot\t_\t_\n5\tin\tin\tADP\tIN\t_\t4\tprep\t_\t_\n6\tpeace\tpeace\tNOUN\tNN\t_\t5\tpobj\t_\tSpaceAfter=No\n7\t.\t.\tPUNCT\t.\t_\t4\tpunct\t_\t_\n\n# sent_id 2\n1\tBut\tbut\tCCONJ\tCC\t_\t4\tcc\t_\t_\n2\tmy\t-PRON-\tADJ\tPRP$\t_\t3\tposs\t_\t_\n3\tenemies\tenemy\tNOUN\tNNS\t_\t4\tnsubj\t_\t_\n4\tbrought\tbring\tVERB\tVBD\t_\t0\troot\t_\t_\n5\tme\t-PRON-\tPRON\tPRP\t_\t4\tdative\t_\t_\n6\twar\twar\tNOUN\tNN\t_\t4\tdobj\t_\tSpaceAfter=No\n7\t.\t.\tPUNCT\t.\t_\t4\tpunct\t_\tSpaceAfter=No\n'
+    observed = export.doc_to_conll(spacy_doc)
+    assert observed == expected

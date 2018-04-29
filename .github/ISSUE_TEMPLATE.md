@@ -1,4 +1,4 @@
-<!--- Provide a general summary of the issue in the Title above -->
+<!--- Provide a general summary of the issue in the title above -->
 
 ## Expected Behavior
 <!--- If you're describing a bug, tell us what should happen -->
@@ -15,19 +15,16 @@
 ## Steps to Reproduce (for bugs)
 <!--- Provide a link to a live example, or an unambiguous set of steps to -->
 <!--- reproduce this bug. Include code to reproduce, if relevant -->
-1.
-2.
-3.
-4.
 
 ## Context
 <!--- How has this issue affected you? What are you trying to accomplish? -->
 <!--- Providing context helps us come up with a solution that is most useful in the real world -->
 
 ## Your Environment
-<!--- Include as many relevant details about the environment you experienced the bug in -->
-* Version used:
-* Environment name and version (e.g. PHP 5.4 on nginx 1.9.1):
-* Server type and version:
-* Operating System and version:
-* Link to your project:
+<!--- Include relevant details about the environment in which you experienced the bug. For convenience, you can just copy-paste the output of `textacy.utils.print_markdown(textacy.utils.get_config())`-->
+
+- operating system:
+- python version:
+- `spacy` version:
+- installed `spacy` models:
+- `textacy` version:

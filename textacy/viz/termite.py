@@ -1,7 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import matplotlib.pyplot as plt
 import numpy as np
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    pass
 
 
 RC_PARAMS = {'axes.axisbelow': True,
@@ -46,7 +49,7 @@ def draw_termite_plot(values_mat, col_labels, row_labels,
     layout that promotes comparison of terms both within and across topics.
 
     Args:
-        values_mat (``np.ndarray`` or matrix): matrix of values with shape
+        values_mat (:class:`np.ndarray` or matrix): matrix of values with shape
             (# row labels, # col labels) used to size the dots on the grid
         col_labels (seq[str]): labels used to identify x-axis ticks on the grid
         row_labels(seq[str]): labels used to identify y-axis ticks on the grid
@@ -58,20 +61,28 @@ def draw_termite_plot(values_mat, col_labels, row_labels,
         save (str, optional): give the full /path/to/fname on disk to save figure
 
     Returns:
-        ``matplotlib.axes.Axes.axis``: axis on which termite plot is plotted
+        :obj:`matplotlib.axes.Axes.axis`: Axis on which termite plot is plotted.
 
     Raises:
         ValueError: if more columns are selected for highlighting than colors
             or if any of the inputs' dimensions don't match
 
     References:
-        .. Chuang, Jason, Christopher D. Manning, and Jeffrey Heer. "Termite:
-            Visualization techniques for assessing textual topic models."
-            Proceedings of the International Working Conference on Advanced
-            Visual Interfaces. ACM, 2012.
+        Chuang, Jason, Christopher D. Manning, and Jeffrey Heer. "Termite:
+        Visualization techniques for assessing textual topic models."
+        Proceedings of the International Working Conference on Advanced
+        Visual Interfaces. ACM, 2012.
 
-    .. seealso:: :func:`TopicModel.termite_plot <textacy.tm.TopicModel.termite_plot>`
+    See Also:
+        :meth:`TopicModel.termite_plot() <textacy.tm.topic_model.TopicModel.termite_plot>`
     """
+    try:
+        plt
+    except NameError:
+        raise ImportError(
+            '`matplotlib` is not installed, so `textacy.viz` won\'t work; '
+            'install it individually via `$ pip install matplotlib`, or '
+            'along with textacy via `pip install textacy[viz]`.')
     n_rows, n_cols = values_mat.shape
     max_val = np.max(values_mat)
 
@@ -126,14 +137,14 @@ def draw_termite_plot(values_mat, col_labels, row_labels,
             if highlight_cols is not None and col_ind in highlight_cols:
                 ax.scatter([col_ind for _ in range(n_rows)],
                            [i for i in range(n_rows)],
-                           s=600*(values_mat[:, col_ind] / max_val),
+                           s=600 * (values_mat[:, col_ind] / max_val),
                            alpha=0.5, linewidth=1,
                            color=highlight_colors[col_ind][0],
                            edgecolor=highlight_colors[col_ind][1])
             else:
                 ax.scatter([col_ind for _ in range(n_rows)],
                            [i for i in range(n_rows)],
-                           s=600*(values_mat[:, col_ind] / max_val),
+                           s=600 * (values_mat[:, col_ind] / max_val),
                            alpha=0.5, linewidth=1,
                            color='lightgray', edgecolor='gray')
 

@@ -1,4 +1,9 @@
-"""Convenient and consolidated topic-modeling, built on ``scikit-learn``."""
+"""
+Topic Models
+------------
+
+Convenient and consolidated topic-modeling, built on ``scikit-learn``.
+"""
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import logging
@@ -7,10 +12,10 @@ import numpy as np
 from sklearn.decomposition import NMF, LatentDirichletAllocation, TruncatedSVD
 from sklearn.externals import joblib
 
-from textacy import viz
+from .. import compat
+from .. import viz
 
-
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class TopicModel(object):
@@ -19,25 +24,14 @@ class TopicModel(object):
     implementations of LSA, LDA, and NMF models. Inspect and visualize results.
     Save and load trained models to and from disk.
 
-    Stream a corpus with metadata from disk::
+    Prepare a vectorized corpus (i.e. document-term matrix) and corresponding
+    vocabulary (i.e. mapping of term strings to column indices in the matrix).
+    See :class:`textacy.vsm.Vectorizer` for details. In short::
 
-        >>> cw = textacy.corpora.CapitolWords()
-        >>> text_stream, metadata_stream = textacy.fileio.split_record_fields(
-        ...     cw.records(limit=1000), 'text', itemwise=False)
-        >>> corpus = textacy.Corpus('en', texts=text_stream, metadatas=metadata_stream)
-        >>> corpus
-        Corpus(1000 docs; 537742 tokens)
-
-    Tokenize and vectorize the corpus::
-
-        >>> terms_lists = (doc.to_terms_list(ngrams=1, named_entities=True, as_strings=True)
-        ...                for doc in corpus)
-        >>> doc_term_matrix, id2term = textacy.vsm.doc_term_matrix(
-        ...     terms_lists, weighting='tfidf', normalize=True, smooth_idf=True,
+        >>> vectorizer = Vectorizer(
+        ...     tf_type='linear', apply_idf=True, idf_type='smooth', norm='l2',
         ...     min_df=3, max_df=0.95, max_n_terms=100000)
-        >>> doc_term_matrix
-        <1000x5579 sparse matrix of type '<class 'numpy.float64'>'
-                with 105632 stored elements in Compressed Sparse Row format>
+        >>> doc_term_matrix = vectorizer.fit_transform(terms_list)
 
     Initialize and train a topic model::
 
@@ -49,7 +43,7 @@ class TopicModel(object):
     Transform the corpus and interpret our model::
 
         >>> doc_topic_matrix = model.transform(doc_term_matrix)
-        >>> for topic_idx, top_terms in model.top_topic_terms(id2term, topics=[0,1]):
+        >>> for topic_idx, top_terms in model.top_topic_terms(vectorizer.id_to_term, topics=[0,1]):
         ...     print('topic', topic_idx, ':', '   '.join(top_terms))
         topic 0 : people   american   go   year   work   think   $   today   money   america
         topic 1 : rescind   quorum   order   unanimous   consent   ask   president   mr.   madam   absence
@@ -85,7 +79,7 @@ class TopicModel(object):
 
     Visualize the model::
 
-        >>> model.termite_plot(doc_term_matrix, id2term,
+        >>> model.termite_plot(doc_term_matrix, vectorizer.id_to_term,
         ...                    topics=-1,  n_terms=25, sort_terms_by='seriation')
 
     Persist our topic model to disk::
@@ -149,7 +143,7 @@ class TopicModel(object):
 
     def save(self, filename):
         _ = joblib.dump(self.model, filename, compress=3)
-        logger.info('{} model saved to {}'.format(self.model, filename))
+        LOGGER.info('%s model saved to %s', self.model, filename)
 
     @classmethod
     def load(cls, filename):
@@ -182,14 +176,14 @@ class TopicModel(object):
         correspond to documents and columns to the topics in the topic model.
 
         Args:
-            doc_term_matrix (array-like or sparse matrix): corpus represented as a
-                document-term matrix with shape (n_docs, n_terms); NOTE: LDA expects
-                tf-weighting, while NMF and LSA may do better with tfidf-weighting!
+            doc_term_matrix (array-like or sparse matrix): Corpus represented as a
+                document-term matrix with shape (n_docs, n_terms). LDA expects
+                tf-weighting, while NMF and LSA may do better with tfidf-weighting.
             normalize (bool): if True, the values in each row are normalized,
                 i.e. topic weights on each document sum to 1
 
         Returns:
-            ``numpy.ndarray``: document-topic matrix with shape (n_docs, n_topics)
+            :class:`numpy.ndarray`: Document-topic matrix with shape (n_docs, n_topics).
         """
         doc_topic_matrix = self.transform(doc_term_matrix)
         if normalize is True:
@@ -227,7 +221,7 @@ class TopicModel(object):
                     [(0, (('foo', 0.1415), ('bar', 0.0986)))]
         """
         if topics == -1:
-            topics = range(self.n_topics)
+            topics = compat.range_(self.n_topics)
         elif isinstance(topics, int):
             topics = (topics,)
 
@@ -246,9 +240,8 @@ class TopicModel(object):
         Get the top ``top_n`` docs by weight per topic in ``doc_topic_matrix``.
 
         Args:
-            doc_topic_matrix (``numpy.ndarray``): document-topic matrix with shape
-                (n_docs, n_topics), the result of calling
-                :func:`get_doc_topic_matrix() <textacy.topic_modeling.get_doc_topic_matrix>`
+            doc_topic_matrix (:class:`numpy.ndarray`): document-topic matrix with shape
+                (n_docs, n_topics), the result of calling :meth:`TopicModel.get_doc_topic_matrix()`
             topics (int or Sequence[int]): topic(s) for which to return top docs;
                 if -1, all topics' docs are returned
             top_n (int): number of top docs to return per topic
@@ -269,7 +262,7 @@ class TopicModel(object):
                     [(0, ((4, 0.3217), (2, 0.2154)))]
         """
         if topics == -1:
-            topics = range(self.n_topics)
+            topics = compat.range_(self.n_topics)
         elif isinstance(topics, int):
             topics = (topics,)
 
@@ -287,9 +280,8 @@ class TopicModel(object):
         Get the top ``top_n`` topics by weight per doc for ``docs`` in ``doc_topic_matrix``.
 
         Args:
-            doc_topic_matrix (``numpy.ndarray``): document-topic matrix with shape
-                (n_docs, n_topics), the result of calling
-                :func:`get_doc_topic_matrix() <textacy.topic_modeling.get_doc_topic_matrix>`
+            doc_topic_matrix (:class:`numpy.ndarray`): document-topic matrix with shape
+                (n_docs, n_topics), the result of calling :meth:`TopicModel.get_doc_topic_matrix()`
             docs (int or Sequence[int]): docs for which to return top topics;
                 if -1, all docs' top topics are returned
             top_n (int): number of top topics to return per doc
@@ -310,7 +302,7 @@ class TopicModel(object):
                     [(0, ((1, 0.2855), (4, 0.2412)))]
         """
         if docs == -1:
-            docs = range(doc_topic_matrix.shape[0])
+            docs = compat.range_(doc_topic_matrix.shape[0])
         elif isinstance(docs, int):
             docs = (docs,)
 
@@ -330,12 +322,11 @@ class TopicModel(object):
         or not. I suppose either way makes sense... o_O
 
         Args:
-            doc_topic_matrix (``numpy.ndarray``): document-topic matrix with shape
-                (n_docs, n_topics), the result of calling
-                :func:`get_doc_topic_matrix() <textacy.topic_modeling.get_doc_topic_matrix>`
+            doc_topic_matrix (:class:`numpy.ndarray`): document-topic matrix with shape
+                (n_docs, n_topics), the result of calling :meth:`TopicModel.get_doc_topic_matrix()`
 
         Returns:
-            ``numpy.ndarray``: the ith element is the ith topic's overall weight
+            :class:`numpy.ndarray`: the ith element is the ith topic's overall weight
         """
         return doc_topic_matrix.sum(axis=0) / doc_topic_matrix.sum(axis=0).sum()
 
@@ -354,7 +345,7 @@ class TopicModel(object):
         to promote comparison of terms both within and across topics.
 
         Args:
-            doc_term_matrix (``np.ndarray``-like or sparse matrix): corpus
+            doc_term_matrix (:class:`numpy.ndarray` or sparse matrix): corpus
                 represented as a document-term matrix with shape (n_docs, n_terms);
                 may have tf- or tfidf-weighting
             id2term (List[str] or dict): object that returns the term string corresponding
@@ -377,7 +368,7 @@ class TopicModel(object):
             save (str): give the full /path/to/fname on disk to save figure
 
         Returns:
-            ``matplotlib.axes.Axes.axis``: axis on which termite plot is plotted
+            ``matplotlib.axes.Axes.axis``: Axis on which termite plot is plotted.
 
         Raises:
             ValueError: if more than 6 topics are selected for highlighting, or
@@ -385,13 +376,14 @@ class TopicModel(object):
                 and/or sort_terms_by params
 
         References:
-            .. Chuang, Jason, Christopher D. Manning, and Jeffrey Heer. "Termite:
-                Visualization techniques for assessing textual topic models."
-                Proceedings of the International Working Conference on Advanced
-                Visual Interfaces. ACM, 2012.
-            .. for sorting by "seriation", see https://arxiv.org/abs/1406.5370
+            - Chuang, Jason, Christopher D. Manning, and Jeffrey Heer. "Termite:
+              Visualization techniques for assessing textual topic models."
+              Proceedings of the International Working Conference on Advanced
+              Visual Interfaces. ACM, 2012.
+            - for sorting by "seriation", see https://arxiv.org/abs/1406.5370
 
-        .. seealso:: :func:`viz.termite_plot <textacy.viz.termite.termite_plot>`
+        See Also:
+            :func:`viz.termite_plot <textacy.viz.termite.termite_plot>`
 
         TODO: `rank_terms_by` other metrics, e.g. topic salience or relevance
         """
@@ -403,7 +395,7 @@ class TopicModel(object):
 
         # get topics indices
         if topics == -1:
-            topic_inds = tuple(range(self.n_topics))
+            topic_inds = tuple(compat.range_(self.n_topics))
         elif isinstance(topics, int):
             topic_inds = (topics,)
         else:
@@ -423,7 +415,7 @@ class TopicModel(object):
 
         # get column index of any topics to highlight in termite plot
         if highlight_topics is not None:
-            highlight_cols = tuple(i for i in range(len(topic_inds))
+            highlight_cols = tuple(i for i in compat.range_(len(topic_inds))
                                    if topic_inds[i] in highlight_topics)
         else:
             highlight_cols = None

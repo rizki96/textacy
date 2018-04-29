@@ -1,4 +1,7 @@
 """
+Text Utils
+----------
+
 Set of small utility functions that take text strings as input.
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
@@ -6,15 +9,47 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import logging
 import re
 
-from cld2 import detect as cld2_detect
+try:
+    from cld2 import detect as cld2_detect
+except ImportError:
+    pass
 
-from textacy.compat import PY2, unicode_to_bytes
-from textacy.constants import (ACRONYM_REGEX, DANGLING_PARENS_TERM_RE,
-                               LEAD_HYPHEN_TERM_RE, LEAD_TAIL_CRUFT_TERM_RE,
-                               NEG_DIGIT_TERM_RE, NONBREAKING_SPACE_REGEX,
-                               WEIRD_HYPHEN_SPACE_TERM_RE, WEIRD_APOSTR_SPACE_TERM_RE)
+from . import compat
+from . import constants
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
+
+
+def detect_language(text):
+    """
+    Detect the most likely language of a text and return its 2-letter code
+    (see https://cloud.google.com/translate/v2/using_rest#language-params).
+    Uses the `cld2-cffi <https://pypi.python.org/pypi/cld2-cffi>`_ package;
+    to take advantage of optional params, call :func:`cld2.detect()` directly.
+
+    Args:
+        text (str)
+
+    Returns:
+        str
+    """
+    try:
+        cld2_detect
+    except NameError:
+        raise ImportError(
+            '`cld2-cffi` must be installed to use textacy\'s automatic language detection; '
+            'you may do so via `pip install cld2-cffi` or `pip install textacy[lang]`.'
+            )
+
+    if compat.is_python2:
+        is_reliable, _, best_guesses = cld2_detect(compat.unicode_to_bytes(text), bestEffort=True)
+    else:
+        is_reliable, _, best_guesses = cld2_detect(text, bestEffort=True)
+    if is_reliable is False:
+        LOGGER.warning(
+            'Text language detected with low confidence; best guesses: %s',
+            best_guesses)
+    return best_guesses[0][1]
 
 
 def is_acronym(token, exclude=None):
@@ -53,32 +88,9 @@ def is_acronym(token, exclude=None):
     if not 2 <= sum(1 for char in token if char.isalnum()) <= 10:
         return False
     # only certain combinations of letters, digits, and '&/.-' allowed
-    if not ACRONYM_REGEX.match(token):
+    if not constants.ACRONYM_REGEX.match(token):
         return False
     return True
-
-
-def detect_language(text):
-    """
-    Detect the most likely language of a text and return its 2-letter code
-    (see https://cloud.google.com/translate/v2/using_rest#language-params).
-    Uses the `cld2-cffi <https://pypi.python.org/pypi/cld2-cffi>`_ package;
-    to take advantage of optional params, call :func:`cld2.detect()` directly.
-
-    Args:
-        text (str)
-
-    Returns:
-        str
-    """
-    if PY2:
-        is_reliable, _, best_guesses = cld2_detect(unicode_to_bytes(text), bestEffort=True)
-    else:
-        is_reliable, _, best_guesses = cld2_detect(text, bestEffort=True)
-    if is_reliable is False:
-        msg = 'Text language detected with low confidence; best guesses: %s'
-        logger.warning(msg, best_guesses)
-    return best_guesses[0][1]
 
 
 def keyword_in_context(text, keyword, ignore_case=True,
@@ -134,31 +146,32 @@ def clean_terms(terms):
 
     Yields:
         str: next term in `terms` but with the cruft cleaned up, excluding terms
-            that were _entirely_ cruft
+        that were _entirely_ cruft
 
-    .. warning:: Terms with (intentionally) unusual punctuation may get "cleaned"
+    Warning:
+        Terms with (intentionally) unusual punctuation may get "cleaned"
         into a form that changes or obscures the original meaning of the term.
     """
     # get rid of leading/trailing junk characters
-    terms = (LEAD_TAIL_CRUFT_TERM_RE.sub('', term)
+    terms = (constants.LEAD_TAIL_CRUFT_TERM_RE.sub('', term)
              for term in terms)
-    terms = (LEAD_HYPHEN_TERM_RE.sub(r'\1', term)
+    terms = (constants.LEAD_HYPHEN_TERM_RE.sub(r'\1', term)
              for term in terms)
     # handle dangling/backwards parens, don't allow '(' or ')' to appear without the other
     terms = ('' if term.count(')') != term.count('(') or term.find(')') < term.find('(')
              else term if '(' not in term
-             else DANGLING_PARENS_TERM_RE.sub(r'\1\2\3', term)
+             else constants.DANGLING_PARENS_TERM_RE.sub(r'\1\2\3', term)
              for term in terms)
     # handle oddly separated hyphenated words
     terms = (term if '-' not in term
-             else NEG_DIGIT_TERM_RE.sub(r'\1\2', WEIRD_HYPHEN_SPACE_TERM_RE.sub(r'\1', term))
+             else constants.NEG_DIGIT_TERM_RE.sub(r'\1\2', constants.WEIRD_HYPHEN_SPACE_TERM_RE.sub(r'\1', term))
              for term in terms)
     # handle oddly separated apostrophe'd words
-    terms = (WEIRD_APOSTR_SPACE_TERM_RE.sub(r'\1\2', term)
+    terms = (constants.WEIRD_APOSTR_SPACE_TERM_RE.sub(r'\1\2', term)
              if "'" in term else term
              for term in terms)
     # normalize whitespace
-    terms = (NONBREAKING_SPACE_REGEX.sub(' ', term).strip()
+    terms = (constants.NONBREAKING_SPACE_REGEX.sub(' ', term).strip()
              for term in terms)
     for term in terms:
         if re.search(r'\w', term):

@@ -1,17 +1,42 @@
+.. _ref-api-reference:
+
 API Reference
 =============
 
-Doc and Corpus
---------------
+Doc
+---
 
 .. automodule:: textacy.doc
     :members:
 
+Corpus
+------
+
 .. automodule:: textacy.corpus
     :members:
 
+.. _ref-api-datasets:
+
+Datasets
+--------
+
+.. automodule:: textacy.datasets.capitol_words
+    :members:
+
+.. automodule:: textacy.datasets.supreme_court
+    :members:
+
+.. automodule:: textacy.datasets.wikipedia
+    :members:
+
+.. automodule:: textacy.datasets.reddit_comments
+    :members:
+
+.. automodule:: textacy.datasets.oxford_text_archive
+    :members:
+
 Text Preprocessing
-----------------------
+------------------
 
 .. automodule:: textacy.preprocess
     :members:
@@ -25,49 +50,40 @@ Information Extraction
 .. automodule:: textacy.keyterms
     :members:
 
-Representations
----------------
+Vectorization & Topic Modeling
+------------------------------
 
-.. automodule:: textacy.network
+.. automodule:: textacy.vsm.vectorizers
     :members:
 
-.. automodule:: textacy.vsm
+.. automodule:: textacy.vsm.matrix_utils
     :members:
-
-Topic Modeling
---------------
 
 .. automodule:: textacy.tm.topic_model
     :members:
 
-File IO
--------
+IO
+--
 
-.. automodule:: textacy.fileio.read
+.. automodule:: textacy.io.utils
     :members:
 
-.. automodule:: textacy.fileio.write
+.. automodule:: textacy.io.text
     :members:
 
-.. automodule:: textacy.fileio.utils
+.. automodule:: textacy.io.json
     :members:
 
-Corpora
--------
-
-.. automodule:: textacy.corpora.supremecourt
+.. automodule:: textacy.io.csv
     :members:
 
-.. automodule:: textacy.corpora.capitolwords
+.. automodule:: textacy.io.matrix
     :members:
 
-.. automodule:: textacy.corpora.bernie_and_hillary
+.. automodule:: textacy.io.spacy
     :members:
 
-.. automodule:: textacy.corpora.wiki_reader
-    :members:
-
-.. automodule:: textacy.corpora.reddit_reader
+.. automodule:: textacy.io.http
     :members:
 
 Visualization
@@ -82,17 +98,20 @@ Visualization
 Utilities
 ---------
 
+.. automodule:: textacy.cache
+    :members:
+
 .. automodule:: textacy.text_utils
     :members:
 
 .. automodule:: textacy.spacy_utils
     :members:
 
-.. automodule:: textacy.math_utils
-    :members:
+Miscellany
+----------
 
-Other Stuff!
-------------
+.. automodule:: textacy.network
+    :members:
 
 .. automodule:: textacy.similarity
     :members:
@@ -100,8 +119,14 @@ Other Stuff!
 .. automodule:: textacy.text_stats
     :members:
 
-.. automodule:: textacy.data
+.. automodule:: textacy.lexicon_methods
     :members:
 
-.. automodule:: textacy.lexicon_methods
+Spacier
+-------
+
+.. automodule:: textacy.spacier.components
+    :members:
+
+.. automodule:: textacy.spacier.utils
     :members:

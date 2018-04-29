@@ -1,90 +1,103 @@
 # -*- coding: utf-8 -*-
 """
-The Supreme Court Corpus
-------------------------
+Supreme Court Decisions
+-----------------------
 
-Download to and stream from disk a corpus of (almost all) decisions issued by
-the U.S. Supreme Court from 1946 through 2016. That amounts to about 8.4k
-documents and 71M tokens, where each document contains 11 fields:
+A collection of ~8.4k (almost all) decisions issued by the U.S. Supreme Court
+from November 1946 through June 2016 -- the "modern" era.
 
-    * ``text``: full text of the Court's decision
-    * ``case_name``: name of the court case, in all caps
-    * ``argument_date``: date on which the case was argued before the Court, as a
-      string with format 'YYYY-MM-DD'
-    * ``decision_date``: date on which the Court's decision was announced, as a
-      string with format 'YYYY-MM-DD'
-    * ``decision_direction``: ideological direction of the majority decision; either
-      'conservative', 'liberal', or 'unspecifiable'
-    * ``maj_opinion_author``: name of the majority opinion's author, if available
+Records include the following fields:
+
+    * ``text``: Full text of the Court's decision.
+    * ``case_name``: Name of the court case, in all caps.
+    * ``argument_date``: Date on which the case was argued before the Court, as
+      an ISO-formatted string ("YYYY-MM-DD").
+    * ``decision_date``: Date on which the Court's decision was announced, as
+      an ISO-formatted string ("YYYY-MM-DD").
+    * ``decision_direction``: Ideological direction of the majority's decision:
+      one of "conservative", "liberal", or "unspecifiable".
+    * ``maj_opinion_author``: Name of the majority opinion's author, if available
       and identifiable, as an integer code whose mapping is given in
-      ``SupremeCourt.opinion_author_codes``
-    * ``n_maj_votes``: number of justices voting in the majority
-    * ``n_min_votes``: number of justices voting in the minority
-    * ``issue``: subject matter of the case's core disagreement (e.g. affirmative
-      action) rather than its legal basis (e.g. the equal protection clause),
-      as a string code whose mapping is given in ``SupremeCourt.issue_codes``
-    * ``issue_area``: higher-level categorization of the issue (e.g. Civil Rights),
-      as an integer code whose mapping is given in ``SupremeCourt.issue_area_codes``
-    * ``us_cite_id``: citation identifier for each case according to the official
-      United States Reports; Note: There are ~300 cases with duplicate ids,
-      and it's not clear if that's "correct" or a data quality problem
+      :attr:`SupremeCourt.opinion_author_codes`.
+    * ``n_maj_votes``: Number of justices voting in the majority.
+    * ``n_min_votes``: Number of justices voting in the minority.
+    * ``issue``: Subject matter of the case's core disagreement (e.g. "affirmative
+      action") rather than its legal basis (e.g. "the equal protection clause"),
+      as a string code whose mapping is given in :attr:`SupremeCourt.issue_codes`.
+    * ``issue_area``: Higher-level categorization of the issue (e.g. "Civil Rights"),
+      as an integer code whose mapping is given in :attr:`SupremeCourt.issue_area_codes`.
+    * ``us_cite_id``: Citation identifier for each case according to the official
+      United States Reports. Note: There are ~300 cases with duplicate ids,
+      and it's not clear if that's "correct" or a data quality problem.
 
 The text in this dataset was derived from FindLaw's searchable database of court
-cases: http://caselaw.findlaw.com/court/us-supreme-court
+cases: http://caselaw.findlaw.com/court/us-supreme-court.
 
 The metadata was extracted without modification from the Supreme Court Database:
 Harold J. Spaeth, Lee Epstein, et al. 2016 Supreme Court Database, Version 2016
 Release 1. http://supremecourtdatabase.org. Its license is CC BY-NC 3.0 US:
-https://creativecommons.org/licenses/by-nc/3.0/us/
+https://creativecommons.org/licenses/by-nc/3.0/us/.
 
-This corpus' creation was inspired by a blog post by Emily Barry:
-http://www.emilyinamillion.me/blog/2016/7/13/visualizing-supreme-court-topics-over-time
+This dataset's creation was inspired by a blog post by Emily Barry:
+http://www.emilyinamillion.me/blog/2016/7/13/visualizing-supreme-court-topics-over-time.
 
-NOTE: The two datasets were merged through much munging and a carefully
+The two datasets were merged through much munging and a carefully
 trained model using the ``dedupe`` package. The model's duplicate threshold
 was set so as to maximize the F-score where precision had twice as much
 weight as recall. Still, given occasionally baffling inconsistencies in case
 naming, citation ids, and decision dates, a very small percentage of texts
-may be incorrectly matched to metadata.
+may be incorrectly matched to metadata. (Sorry.)
 """
-import io
+from __future__ import unicode_literals
+
 import logging
 import os
 
 import requests
 
-from textacy import __resources_dir__
-from textacy.compat import PY2, string_types
-from textacy.fileio import make_dirs, read_json_lines
-
-if PY2:
-    URL = 'https://s3.amazonaws.com/chartbeat-labs/supreme-court-py2.json.gz'
-else:
-    URL = 'https://s3.amazonaws.com/chartbeat-labs/supreme-court-py3.json.gz'
-FILENAME = URL.rsplit('/', 1)[-1]
-
-MIN_DATE = '1946-11-18'
-MAX_DATE = '2016-06-27'
+from .. import compat
+from .. import data_dir
+from .. import io
+from .base import Dataset
 
 LOGGER = logging.getLogger(__name__)
 
+NAME = 'supreme_court'
+DESCRIPTION = ('Collection of ~8.4k decisions issued by the U.S. Supreme Court '
+               'between November 1946 and June 2016.')
+SITE_URL = 'http://caselaw.findlaw.com/court/us-supreme-court'
+DOWNLOAD_ROOT = 'https://github.com/bdewilde/textacy-data/releases/download/'
+DATA_DIR = os.path.join(data_dir, NAME)
 
-class SupremeCourt(object):
+
+class SupremeCourt(Dataset):
     """
-    Download data and stream from disk a collection of Supreme Court decisions
-    that includes the full text and key metadata for each::
+    Stream U.S. Supreme Court decisions from a compressed json file on disk,
+    either as texts (str) or records (dict) with both text content and metadata.
 
-        >>> sc = textacy.corpora.SupremeCourt()
+    Download a Python version-specific compressed json file from the
+    `textacy-data <https://github.com/bdewilde/textacy-data>`_ repo::
+
+        >>> sc = SupremeCourt()
+        >>> sc.download()
+        >>> sc.info
+        {'data_dir': 'path/to/textacy/data/supreme_court',
+         'description': 'Collection of ~8.4k decisions issued by the U.S. Supreme Court between November 1946 and June 2016.',
+         'name': 'supreme_court',
+         'site_url': 'http://caselaw.findlaw.com/court/us-supreme-court'}
+
+    Iterate over decisions as plain texts or records with both text and metadata::
+
         >>> for text in sc.texts(limit=1):
         ...     print(text)
         >>> for record in sc.records(limit=1):
         ...     print(record['case_name'], record['decision_date'])
         ...     print(record['text'])
 
-    Filter court cases by metadata and text length::
+    Filter decisions by a variety of metadata fields and text length::
 
         >>> for record in sc.records(opinion_author=109, limit=1):  # Notorious RBG!
-        ...     print(record['case_name'], record['us_cite_id'])
+        ...     print(record['case_name'], record['decision_direction'], record['n_maj_votes'])
         >>> for record in sc.records(decision_direction='liberal',
         ...                          issue_area={1, 9, 10}, limit=10):
         ...     print(record['maj_opinion_author'], record['n_maj_votes'])
@@ -95,33 +108,35 @@ class SupremeCourt(object):
         >>> for text in sc.texts(min_len=50000):
         ...     print(len(text))
 
-    Stream court cases into a ``Corpus``::
+    Stream decisions into a :class:`textacy.Corpus`::
 
-        >>> text_stream, metadata_stream = textacy.fileio.split_record_fields(
+        >>> text_stream, metadata_stream = textacy.io.split_records(
         ...     sc.records(limit=100), 'text')
-        >>> tc = textacy.Corpus.from_texts('en', text_stream, metadata_stream)
-        >>> print(tc)
+        >>> c = textacy.Corpus('en', texts=text_stream, metadatas=metadata_stream)
+        >>> c
+        Corpus(100 docs; 615135 tokens)
 
     Args:
-        data_dir (str): path on disk containing corpus data; if None, textacy's
-            default `__resources_dir__` is used
-        download_if_missing (bool): if True and corpus data file isn't found on
-            disk, download the file and save it to disk under `data_dir`
-
-    Raises:
-        OSError: if corpus data file isn't found under `data_dir` and
-            `download_if_missing` is False
+        data_dir (str): Path to directory on disk under which the data
+            (a compressed json file like ``supreme-court-py3.json.gz``) is stored.
 
     Attributes:
-        decision_directions (set[str]): all distinct decision directions,
-            e.g. 'liberal'
-        opinion_author_codes (dict): mapping of majority opinion authors from
-            integer code to (str) full name
-        issue_area_codes (dict): mapping of high-level issue area of the case's
-            core disagreement from integer code to (str) description
-        issue_codes (dict): mapping of specific issue of the case's core
-            disagreement from integer code to (str) description
+        min_date (str): Earliest date for which decisions are available, as an
+            ISO-formatted string ("YYYY-MM-DD").
+        max_date (str): Latest date for which decisions are available, as an
+            ISO-formatted string ("YYYY-MM-DD").
+        decision_directions (Set[str]): All distinct decision directions,
+            e.g. "liberal".
+        opinion_author_codes (Dict[int, str]): Mapping of majority opinion authors,
+            from id code to full name.
+        issue_area_codes (Dict[int, str]): Mapping of the high-level issue area of
+            the case's core disagreement, from id code to description.
+        issue_codes (Dict[int, str]): Mapping of the specific issue of the
+            case's core disagreement, from id code to description.
     """
+
+    min_date = '1946-11-18'
+    max_date = '2016-06-27'
 
     decision_directions = {'conservative', 'liberal', 'unspecifiable'}
 
@@ -539,27 +554,137 @@ class SupremeCourt(object):
         '90510': "Supreme Court's certiorari, writ of error, or appeals jurisdiction",
         '90520': 'miscellaneous judicial power, especially diversity jurisdiction'}
 
-    def __init__(self, data_dir=None, download_if_missing=True):
-        if data_dir is None:
-            data_dir = __resources_dir__
-        self.filepath = os.path.join(data_dir, 'supremecourt', FILENAME)
-        if not os.path.exists(self.filepath):
-            if download_if_missing is True:
-                self._download_data()
-            else:
-                raise OSError('file "{}" not found'.format(self.filepath))
+    def __init__(self, data_dir=DATA_DIR):
+        super(SupremeCourt, self).__init__(
+            name=NAME, description=DESCRIPTION, site_url=SITE_URL, data_dir=data_dir)
+        self.filestub = 'supreme-court-py{py_version}.json.gz'.format(
+            py_version=2 if compat.is_python2 else 3)
+        self._filename = os.path.join(data_dir, self.filestub)
 
-    def _download_data(self):
-        LOGGER.info('downloading data from "%s"', URL)
-        response = requests.get(URL)
-        make_dirs(self.filepath, 'wb')
-        with io.open(self.filepath, mode='wb') as f:
-            f.write(response.content)
+    @property
+    def filename(self):
+        """
+        str: Full path on disk for SupremeCourt data as compressed json file.
+            ``None`` if file is not found, e.g. has not yet been downloaded.
+        """
+        if os.path.isfile(self._filename):
+            return self._filename
+        else:
+            return None
+
+    def download(self, force=False):
+        """
+        Download the data as Python version-specific compressed json file and
+        save it to disk under the ``data_dir`` directory.
+
+        Args:
+            force (bool): If True, download the dataset, even if it already
+                exists on disk under ``data_dir``.
+        """
+        release_tag = 'supreme_court_py{py_version}_v{data_version}'.format(
+            py_version=2 if compat.is_python2 else 3,
+            data_version=1.0)
+        url = compat.urljoin(DOWNLOAD_ROOT, release_tag + '/' + self.filestub)
+        fname = self._filename
+        if os.path.isfile(fname) and force is False:
+            LOGGER.warning(
+                'File %s already exists; skipping download...', fname)
+            return
+        LOGGER.info(
+            'Downloading data from %s and writing it to %s', url, fname)
+        io.write_http_stream(
+            url, fname, mode='wb', encoding=None,
+            make_dirs=True, chunk_size=1024)
+
+    def texts(self, opinion_author=None, issue_area=None, decision_direction=None,
+              date_range=None, min_len=None, limit=-1):
+        """
+        Iterate over cases (text-only) in this dataset, optionally filtering
+        by a variety of metadata and/or text length, in chronological order
+        (of decision date).
+
+        Args:
+            opinion_author (int or Set[int]): Filter cases by the name(s) of the
+                majority opinion's author, coded as an integer whose mapping is
+                given in :attr:`opinion_author_codes <SupremeCourt.opinion_author_codes>`.
+            issue_area (int or Set[int]): Filter cases by the issue area of the
+                case's subject matter, coded as an integer whose mapping is
+                given in :attr:`issue_area_codes <SupremeCourt.issue_area_codes>`.
+            decision_direction (str or Set[str]): Filter cases by the ideological
+                direction of the majority's decision; see
+                :attr:`decision_directions <SupremeCourt.decision_directions>`.
+            date_range (List[str] or Tuple[str]): Filter cases by the date on
+                which they were decided; both start and end date must be specified,
+                but a null value for either will be replaced by the min/max date
+                available for the corpus.
+            min_len (int): Filter cases by the length (number of characters)
+                of their text content.
+            limit (int): Yield no more than ``limit`` texts that match all
+                specified filters, in chronological order.
+
+        Yields:
+            str: Full text of next (by chronological order) case in dataset
+            passing all filter params.
+
+        Raises:
+            ValueError: If any filtering options are invalid.
+        """
+        texts = self._iterate(
+            True, opinion_author=opinion_author, issue_area=issue_area,
+            decision_direction=decision_direction, date_range=date_range,
+            min_len=min_len, limit=limit)
+        for text in texts:
+            yield text
+
+    def records(self, opinion_author=None, issue_area=None, decision_direction=None,
+                date_range=None, min_len=None, limit=-1):
+        """
+        Iterate over cases (including text and metadata) in this dataset,
+        optionally filtering by a variety of metadata and/or text length,
+        in chronological order (of decision date).
+
+        Args:
+            opinion_author (int or Set[int]): Filter cases by the name(s) of the
+                majority opinion's author, coded as an integer whose mapping is
+                given in :attr:`opinion_author_codes <SupremeCourt.opinion_author_codes>`.
+            issue_area (int or Set[int]): Filter cases by the issue area of the
+                case's subject matter, coded as an integer whose mapping is
+                given in :attr:`issue_area_codes <SupremeCourt.issue_area_codes>`.
+            decision_direction (str or Set[str]): Filter cases by the ideological
+                direction of the majority's decision; see
+                :attr:`decision_directions <SupremeCourt.decision_directions>`.
+            date_range (List[str] or Tuple[str]): Filter cases by the date on
+                which they were decided; both start and end date must be specified,
+                but a null value for either will be replaced by the min/max date
+                available for the corpus.
+            min_len (int): Filter cases by the length (number of characters)
+                of their text content.
+            limit (int): Yield no more than ``limit`` texts that match all
+                specified filters, in chronological order.
+
+        Yields:
+            dict: Full text and metadata of next (by chronological order) case
+            in dataset passing all filter params.
+
+        Raises:
+            ValueError: If any filtering options are invalid.
+        """
+        records = self._iterate(
+            False, opinion_author=opinion_author, issue_area=issue_area,
+            decision_direction=decision_direction, date_range=date_range,
+            min_len=min_len, limit=limit)
+        for record in records:
+            yield record
 
     def _iterate(self, text_only, opinion_author=None, decision_direction=None,
                  issue_area=None, date_range=None, min_len=None, limit=-1):
-        """Note: Use `.texts()` or `.records()` to iterate over corpus data."""
-        # prepare filters
+        """
+        Low-level method to iterate over the records in this dataset. Used by
+        :meth:`SupremeCourt.texts()` and :meth:`SupremeCourt.records()`.
+        """
+        if not self.filename:
+            raise IOError('{} file not found'.format(self._filename))
+
         if opinion_author:
             if isinstance(opinion_author, int):
                 opinion_author = {opinion_author}
@@ -573,26 +698,17 @@ class SupremeCourt(object):
                 msg = 'invalid `issue_area` value; see `SupremeCourt.issue_area_codes`'
                 raise ValueError(msg)
         if decision_direction:
-            if isinstance(decision_direction, string_types):
+            if isinstance(decision_direction, compat.string_types):
                 decision_direction = {decision_direction}
             if not all(dd in self.decision_directions for dd in decision_direction):
                 msg = 'invalid `decision_direction` value; see `SupremeCourt.decision_directions`'
                 raise ValueError(msg)
         if date_range:
-            if not isinstance(date_range, (list, tuple)):
-                msg = '`date_range` must be a list or tuple, not {}'.format(type(date_range))
-                raise ValueError(msg)
-            if not len(date_range) == 2:
-                msg = '`date_range` must have both start and end values'
-                raise ValueError(msg)
-            if not date_range[0]:
-                date_range = (MIN_DATE, date_range[1])
-            if not date_range[1]:
-                date_range = (date_range[0], MAX_DATE)
+            date_range = self._parse_date_range(date_range)
 
         n = 0
-        mode = 'rb' if PY2 else 'rt'
-        for line in read_json_lines(self.filepath, mode=mode):
+        mode = 'rb' if compat.is_python2 else 'rt'
+        for line in io.read_json(self.filename, mode=mode, lines=True):
             if opinion_author and line['maj_opinion_author'] not in opinion_author:
                 continue
             if issue_area and line['issue_area'] not in issue_area:
@@ -612,80 +728,3 @@ class SupremeCourt(object):
             n += 1
             if n == limit:
                 break
-
-    def texts(self, opinion_author=None, issue_area=None, decision_direction=None,
-              date_range=None, min_len=None, limit=-1):
-        """
-        Iterate over texts in the SupremeCourt corpus, optionally filtering by
-        a variety of metadata and/or text length, in order of decision date.
-
-        Args:
-            opinion_author (int or set[int]): filter cases by the name(s) of the
-                majority opinion's author, coded as an integer whose mapping is
-                given in :meth:`opinion_author_codes <SupremeCourt.opinion_author_codes>`
-            issue_area (int or set[int]): filter cases by the issue area of the
-                case's subject matter, coded as an integer whose mapping is
-                given in :meth:`issue_area_codes <SupremeCourt.issue_area_codes>`
-            decision_direction (str or set[str]): filter cases by the ideological
-                direction of the majority decision; see
-                :meth:`decision_directions <SupremeCourt.decision_directions>`
-            date_range (list[str] or tuple[str]): filter cases by the date on
-                which they were decided; both start and end date must be specified,
-                but a null value for either will be replaced by the min/max date
-                available in the corpus
-            min_len (int): filter cases by the length (number of characters)
-                in their text content
-            limit (int): return no more than `limit` cases, in order of decision date
-
-        Yields:
-            str: full text of next (by chronological order) court case in corpus
-                passing all filter params
-
-        Raises:
-            ValueError: if any filtering options are invalid
-        """
-        texts = self._iterate(
-            True, opinion_author=opinion_author, issue_area=issue_area,
-            decision_direction=decision_direction, date_range=date_range,
-            min_len=min_len, limit=limit)
-        for text in texts:
-            yield text
-
-    def records(self, opinion_author=None, issue_area=None, decision_direction=None,
-                date_range=None, min_len=None, limit=-1):
-        """
-        Iterate over documents (including text and metadata) in the SupremeCourt
-        corpus, optionally filtering by a variety of metadata and/or text length,
-        in order of decision date.
-
-        Args:
-            opinion_author (int or set[int]): filter cases by the name(s) of the
-                majority opinion's author, coded as an integer whose mapping is
-                given in :meth:`opinion_author_codes <SupremeCourt.opinion_author_codes>`
-            issue_area (int or set[int]): filter cases by the issue area of the
-                case's subject matter, coded as an integer whose mapping is
-                given in :meth:`issue_area_codes <SupremeCourt.issue_area_codes>`
-            decision_direction (str or set[str]): filter cases by the ideological
-                direction of the majority decision; see
-                :meth:`decision_directions <SupremeCourt.decision_directions>`
-            date_range (list[str] or tuple[str]): filter cases by the date on
-                which they were decided; both start and end date must be specified,
-                but a null value for either will be replaced by the min/max date
-                available in the corpus
-            min_len (int): filter cases by the length (number of characters)
-                in their text content
-            limit (int): return no more than `limit` cases, in order of decision date
-
-        Yields:
-            dict: full text and metadata of next (by chronological order) court
-                case in corpus passing all filter params
-
-        Raises:
-            ValueError: if any filtering options are invalid
-        """
-        records = self._iterate(
-            False, opinion_author=opinion_author, issue_area=issue_area,
-            decision_direction=decision_direction, date_range=date_range,
-            min_len=min_len, limit=limit)
-        for record in records:
-            yield record

@@ -13,9 +13,7 @@ import unicodedata
 from ftfy import fix_text
 from unidecode import unidecode
 
-from textacy.constants import (CURRENCIES, URL_REGEX, SHORT_URL_REGEX, EMAIL_REGEX,
-                               PHONE_REGEX, NUMBERS_REGEX, PUNCT_REGEX, CURRENCY_REGEX,
-                               LINEBREAK_REGEX, NONBREAKING_SPACE_REGEX)
+from . import constants
 
 
 def fix_bad_unicode(text, normalization='NFC'):
@@ -57,7 +55,7 @@ def normalize_whitespace(text):
     Given ``text`` str, replace one or more spacings with a single space, and one
     or more linebreaks with a single newline. Also strip leading/trailing whitespace.
     """
-    return NONBREAKING_SPACE_REGEX.sub(' ', LINEBREAK_REGEX.sub(r'\n', text)).strip()
+    return constants.NONBREAKING_SPACE_REGEX.sub(' ', constants.LINEBREAK_REGEX.sub(r'\n', text)).strip()
 
 
 def unpack_contractions(text):
@@ -83,27 +81,22 @@ def unpack_contractions(text):
 
 def replace_urls(text, replace_with='*URL*'):
     """Replace all URLs in ``text`` str with ``replace_with`` str."""
-    return URL_REGEX.sub(replace_with, SHORT_URL_REGEX.sub(replace_with, text))
+    return constants.URL_REGEX.sub(replace_with, constants.SHORT_URL_REGEX.sub(replace_with, text))
 
 
 def replace_emails(text, replace_with='*EMAIL*'):
     """Replace all emails in ``text`` str with ``replace_with`` str."""
-    return EMAIL_REGEX.sub(replace_with, text)
+    return constants.EMAIL_REGEX.sub(replace_with, text)
 
 
 def replace_phone_numbers(text, replace_with='*PHONE*'):
     """Replace all phone numbers in ``text`` str with ``replace_with`` str."""
-    return PHONE_REGEX.sub(replace_with, text)
+    return constants.PHONE_REGEX.sub(replace_with, text)
 
 
 def replace_numbers(text, replace_with='*NUMBER*'):
     """Replace all numbers in ``text`` str with ``replace_with`` str."""
-    return NUMBERS_REGEX.sub(replace_with, text)
-
-
-def remove_punct(text):
-    """Remove all punctuation from ``text`` str (replace punct marks with empty string)."""
-    return PUNCT_REGEX.sub('', text)
+    return constants.NUMBERS_REGEX.sub(replace_with, text)
 
 
 def replace_currency_symbols(text, replace_with=None):
@@ -121,11 +114,36 @@ def replace_currency_symbols(text, replace_with=None):
         str
     """
     if replace_with is None:
-        for k, v in CURRENCIES.items():
+        for k, v in constants.CURRENCIES.items():
             text = text.replace(k, v)
         return text
     else:
-        return CURRENCY_REGEX.sub(replace_with, text)
+        return constants.CURRENCY_REGEX.sub(replace_with, text)
+
+
+def remove_punct(text, marks=None):
+    """
+    Remove punctuation from ``text`` by replacing all instances of ``marks``
+    with whitespace.
+
+    Args:
+        text (str): raw text
+        marks (str): If specified, remove only the characters in this string,
+            e.g. ``marks=',;:'`` removes commas, semi-colons, and colons.
+            Otherwise, all punctuation marks are removed.
+
+    Returns:
+        str
+
+    Note:
+        When ``marks=None``, Python's built-in :meth:`str.translate()` is
+        used to remove punctuation; otherwise, a regular expression is used
+        instead. The former's performance is about 5-10x faster.
+    """
+    if marks:
+        return re.sub('[{}]+'.format(re.escape(marks)), ' ', text, flags=re.UNICODE)
+    else:
+        return text.translate(constants.PUNCT_TRANSLATE_UNICODE)
 
 
 def remove_accents(text, method='unicode'):
@@ -191,9 +209,9 @@ def preprocess_text(text, fix_unicode=False, lowercase=False, transliterate=Fals
     Returns:
         str: input ``text`` processed according to function args
 
-    .. warning:: These changes may negatively affect subsequent NLP analysis
-        performed on the text, so choose carefully, and preprocess at your own
-        risk!
+    Warning:
+        These changes may negatively affect subsequent NLP analysis performed
+        on the text, so choose carefully, and preprocess at your own risk!
     """
     if fix_unicode is True:
         text = fix_bad_unicode(text, normalization='NFC')

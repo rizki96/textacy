@@ -1,233 +1,141 @@
 from __future__ import absolute_import, unicode_literals
 
 from operator import itemgetter
-import unittest
 
 import numpy as np
-from spacy import attrs
+import pytest
+import scipy.sparse as sp
+from spacy.tokens.span import Span as SpacySpan
 
-import textacy
+import textacy.datasets
+from textacy import Doc, Corpus, Vectorizer, TextStats, TopicModel, preprocess_text
+from textacy import cache, compat, constants, extract, io, keyterms, text_utils
+
+DATASET = textacy.datasets.CapitolWords()
+
+pytestmark = pytest.mark.skipif(
+    DATASET.filename is None,
+    reason='CapitolWords dataset must be downloaded before running tests')
 
 
-class ReadmeTestCase(unittest.TestCase):
+@pytest.fixture(scope='module')
+def text():
+    return list(DATASET.texts(speaker_name={'Bernie Sanders'}, limit=1))[0]
 
-    def setUp(self):
-        self.text = "Mr. President, I ask to have printed in the Record copies of some of the finalist essays written by Vermont High School students as part of the sixth annual ``What is the State of the Union'' essay contest conducted by my office. These finalists were selected from nearly 800 entries. The material follows: The United States of America is an amazing nation that continues to lead the world through the complex geopolitical problems that we are faced with today. As a strong economic and political world leader, we have become the role model for developing nations attempting to give their people the same freedoms and opportunities that Americans have become so accustomed to. This is why it is so important to work harder than we ever have before to better ourselves as a nation, because what we change will set a precedent of improvement around the world and inspire change. The biggest problem in the U.S. is the incarceration system. It has been broken for decades, and there has been no legitimate attempt to fix it. Over the past thirty years, there has been a 500% increase in incarceration rates, resulting in the U.S. leading the world in number of prisoners with 2.2 million people currently incarcerated. Especially in this example, it is important to humanize these statistics. These are 2.2 million people, who now because of their conviction will find it much harder to be truly integrated back in their communities, due to the struggles of finding a job with a record, and the fact that they often do not qualify for social welfare. The incarceration system is also bankrupting both the state and federal government. It currently is the third highest state expenditure, behind health care and education. Fortunately, we as a nation have the opportunity to fix the incarceration system. First, we need to get rid of mandatory minimum sentences. Judges from across the nation have said for decades that they do not like mandatory minimums, that they do not work, and that they are unconstitutional. Mandatory minimum sentences, coupled with racially biased laws concerning drug possession is the reason why we see the ratio of African American males to white males over 10:1. This leads to the second action we must take; we must end the war on drugs. It has proven to be a failed experiment that has reopened many racial wounds in our nation. The war on drugs also put addicts behind bars, rather than treating addiction like the problem it actually is; a mental health issue."
-        self.doc = textacy.Doc(self.text)
-        cols = [attrs.TAG, attrs.HEAD, attrs.DEP]
-        values = np.array(
-            [[441, 1, 9480], [441, 3, 392], [416, 2, 407], [445, 1, 393],
-             [458, 0, 53503], [452, 2, 370], [454, 1, 370], [457, -3, 411],
-             [432, -1, 405], [426, 2, 379], [441, 1, 9480], [443, -3, 401],
-             [432, -1, 405], [426, -1, 401], [432, -1, 405], [426, 2, 379],
-             [433, 1, 367], [443, -3, 401], [457, -1, 63716], [432, -1, 366],
-             [441, 2, 9480], [441, 1, 9480], [441, 1, 9480], [443, -4, 401],
-             [432, -6, 405], [440, -1, 401], [432, -1, 405], [426, 5, 379],
-             [433, 4, 393], [433, 3, 367], [465, 2, 407], [461, 1, 393],
-             [459, -28, 373], [426, 1, 379], [441, -2, 369], [432, -1, 405],
-             [426, 1, 379], [441, -2, 401], [415, -6, 407], [440, 1, 9480],
-             [440, 0, 53503], [457, -1, 63716], [432, -1, 366], [446, 1, 402],
-             [440, -2, 401], [419, -5, 407], [426, 1, 379], [443, 2, 394],
-             [455, 1, 371], [457, 0, 53503], [432, -1, 405], [447, 1, 365],
-             [425, 1, 1500074], [443, -3, 401], [419, -5, 407], [426, 1, 379],
-             [440, 1, 393], [459, 7, 373], [420, 6, 407], [426, 2, 379],
-             [441, 1, 9480], [441, 3, 393], [432, -1, 405], [441, -1, 401],
-             [459, 0, 53503], [426, 2, 379], [433, 1, 367], [440, -3, 369],
-             [460, 1, 393], [459, -2, 1500076], [452, 1, 370], [454, -2, 411],
-             [426, 1, 379], [440, -2, 380], [432, -3, 405], [426, 3, 379],
-             [433, 2, 367], [433, 1, 367], [443, -4, 401], [460, 3, 380],
-             [445, 2, 394], [458, 1, 371], [457, -4, 1500076], [432, -1, 405],
-             [440, -1, 401], [419, -21, 407], [432, 11, 405], [426, 6, 379],
-             [433, 5, 367], [433, 3, 367], [424, -1, 372], [433, -2, 375],
-             [440, 1, 9480], [440, -7, 401], [416, 3, 407], [445, 2, 393],
-             [458, 1, 370], [457, 0, 53503], [426, 2, 379], [440, 1, 9480],
-             [440, -3, 369], [432, -1, 405], [456, 1, 367], [443, 1, 393],
-             [456, -3, 400], [452, 1, 370], [454, -2, 411], [446, 1, 402],
-             [443, -2, 93815], [426, 2, 379], [433, 1, 367], [443, -5, 380],
-             [424, -1, 372], [443, -2, 375], [460, 3, 380], [442, 2, 393],
-             [458, 1, 370], [457, -6, 1500076], [447, 1, 365], [433, -2, 363],
-             [432, -1, 405], [419, -24, 407], [426, 1, 393], [459, 0, 53503],
-             [463, 2, 365], [445, 1, 393], [459, -3, 364], [447, 1, 365],
-             [433, -2, 363], [452, 1, 370], [454, -2, 411], [448, -1, 365],
-             [432, 3, 387], [445, 2, 393], [447, 1, 365], [458, -4, 364],
-             [432, 2, 387], [452, 1, 370], [447, -8, 364], [445, -1, 380],
-             [432, -2, 405], [426, 1, 379], [440, -2, 401], [416, -13, 407],
-             [432, 5, 387], [461, 2, 380], [445, 1, 393], [458, 2, 376],
-             [437, 1, 370], [454, -19, 364], [426, 1, 379], [440, -2, 380],
-             [432, -1, 405], [440, -1, 401], [432, -1, 405], [426, 1, 379],
-             [440, -2, 401], [424, -8, 372], [440, -9, 375], [440, -1, 380],
-             [419, -37, 407], [426, 2, 379], [435, 1, 367], [440, 4, 393],
-             [432, -1, 405], [426, 1, 379], [441, -2, 401], [459, 0, 53503],
-             [426, 2, 379], [440, 1, 9480], [440, -3, 369], [419, -4, 407],
-             [445, 3, 394], [459, 2, 370], [457, 1, 371], [457, 0, 53503],
-             [432, -1, 405], [443, -1, 401], [416, -3, 407], [424, -4, 372],
-             [427, 2, 381], [459, 1, 370], [457, -7, 375], [426, 2, 379],
-             [433, 1, 367], [440, -3, 369], [452, 1, 370], [454, -2, 63716],
-             [445, -1, 380], [419, -7, 407], [432, 8, 405], [426, 3, 379],
-             [433, 2, 367], [425, 1, 1500074], [443, -4, 401], [416, 3, 407],
-             [427, 2, 381], [459, 1, 370], [457, 0, 53503], [426, 3, 379],
-             [425, 1, 1500074], [440, 1, 9480], [440, -4, 369], [432, -1, 405],
-             [440, 1, 9480], [443, -2, 401], [416, -8, 407], [456, -9, 364],
-             [432, -1, 405], [426, 1, 379], [441, 1, 393], [456, -3, 400],
-             [426, 1, 379], [440, -2, 380], [432, -3, 405], [440, -1, 401],
-             [432, -1, 405], [443, -1, 401], [432, 5, 387], [425, 1, 9480],
-             [425, 1, 1500074], [443, 2, 393], [447, 1, 365], [457, -12, 364],
-             [419, -26, 407], [447, 1, 365], [432, 5, 405], [426, 1, 379],
-             [440, -2, 401], [416, 2, 407], [445, 1, 393], [459, 0, 53503],
-             [433, -1, 363], [452, 1, 370], [454, -3, 411], [426, 1, 379],
-             [443, -2, 380], [419, -6, 407], [426, 1, 393], [458, 0, 53503],
-             [425, 1, 9480], [425, 1, 1500074], [443, -3, 369], [416, -1, 407],
-             [461, 2, 393], [447, 1, 365], [432, -7, 405], [432, -1, 400],
-             [446, 1, 402], [440, -3, 401], [437, 1, 370], [454, -12, 375],
-             [445, 2, 393], [447, 1, 365], [448, -3, 373], [452, 1, 370],
-             [454, 2, 371], [447, 1, 365], [457, -7, 373], [447, -1, 365],
-             [432, -1, 405], [446, 1, 402], [443, -2, 401], [416, -5, 407],
-             [432, -6, 405], [432, -1, 400], [426, 1, 379], [443, -3, 401],
-             [432, -1, 405], [456, -1, 400], [426, 1, 379], [440, -2, 380],
-             [432, -1, 405], [426, 1, 379], [440, -2, 401], [416, -17, 407],
-             [424, -18, 372], [426, 1, 379], [440, -20, 375], [432, 5, 387],
-             [445, 4, 393], [447, 3, 365], [458, 2, 370], [447, 1, 389],
-             [454, -6, 63716], [432, -1, 405], [433, 1, 367], [440, -2, 401],
-             [419, -49, 407], [426, 2, 379], [440, 1, 9480], [440, 3, 393],
-             [459, 2, 370], [447, 1, 365], [456, 0, 53503], [424, 2, 404],
-             [426, 1, 379], [440, 3, 390], [424, -1, 372], [433, -2, 375],
-             [440, -6, 380], [419, -7, 407], [445, 2, 393], [447, 1, 365],
-             [459, 0, 53503], [426, 4, 379], [433, 3, 367], [435, 2, 367],
-             [440, 1, 9480], [440, -5, 369], [416, -6, 407], [432, -7, 405],
-             [440, 1, 9480], [440, -2, 401], [424, -1, 372], [440, -2, 375],
-             [419, -12, 407], [447, 6, 365], [416, 5, 407], [445, 4, 393],
-             [432, -1, 405], [426, 1, 379], [440, -2, 401], [458, 0, 53503],
-             [426, 1, 379], [440, -2, 380], [452, 1, 370], [454, -2, 63716],
-             [426, 2, 379], [440, 1, 9480], [440, -3, 380], [419, -8, 407],
-             [447, 3, 365], [416, 2, 407], [445, 1, 393], [458, 0, 53503],
-             [452, 1, 370], [454, -2, 411], [433, -1, 411], [432, -1, 405],
-             [433, 2, 367], [433, 1, 367], [443, -3, 401], [419, -8, 407],
-             [443, 6, 393], [432, -1, 405], [432, -1, 405], [426, 1, 379],
-             [440, -2, 401], [458, 1, 370], [457, 0, 53503], [432, -1, 405],
-             [443, -1, 401], [460, 4, 387], [445, 3, 393], [458, 2, 370],
-             [447, 1, 389], [454, -7, 373], [433, 1, 367], [443, -2, 380],
-             [416, -3, 407], [432, 4, 387], [445, 3, 393], [458, 2, 370],
-             [447, 1, 389], [454, -8, 375], [416, -1, 407], [424, -2, 372],
-             [432, 2, 387], [445, 1, 393], [458, -20, 373], [433, -1, 363],
-             [419, -22, 407], [433, 2, 367], [433, 1, 367], [443, 10, 393],
-             [416, -1, 407], [457, -2, 63716], [432, -1, 405], [447, 1, 365],
-             [433, 1, 367], [443, -3, 401], [456, -1, 405], [440, 1, 9480],
-             [440, -2, 401], [459, 0, 53503], [426, 1, 379], [440, -2, 369],
-             [463, 2, 365], [445, 1, 393], [458, -3, 1500076], [426, 1, 379],
-             [440, -2, 380], [432, -1, 405], [433, 2, 367], [433, 1, 367],
-             [443, -3, 401], [432, -5, 405], [433, 1, 367], [443, -2, 401],
-             [432, -8, 405], [425, -1, 401], [419, -17, 407], [426, 1, 393],
-             [459, 11, 373], [432, -1, 405], [426, 2, 379], [433, 1, 367],
-             [440, -3, 401], [445, 2, 393], [437, 1, 370], [454, -3, 1500076],
-             [420, 3, 407], [445, 2, 393], [437, 1, 370], [454, 0, 53503],
-             [426, 1, 379], [440, -2, 380], [432, -1, 405], [443, -1, 401],
-             [419, -5, 407], [445, 2, 393], [459, 1, 370], [457, 0, 53503],
-             [452, 1, 370], [454, -2, 411], [426, 2, 379], [457, 1, 367],
-             [440, -3, 369], [460, 2, 393], [459, 1, 370], [457, -3, 1500076],
-             [433, 2, 367], [433, 1, 367], [443, -3, 380], [432, -1, 405],
-             [446, 1, 402], [440, -2, 401], [419, -15, 407], [426, 1, 379],
-             [440, 4, 393], [432, -1, 405], [443, -1, 401], [447, 1, 365],
-             [458, 0, 53503], [443, -1, 380], [432, -2, 405], [443, -1, 401],
-             [416, -4, 407], [447, 1, 365], [432, -6, 372], [456, -7, 364],
-             [440, -1, 380], [432, -2, 405], [426, 1, 379], [440, -2, 401],
-             [445, 2, 393], [447, 1, 365], [459, -3, 1500076], [420, -1, 407],
-             [426, 3, 379], [433, 1, 367], [440, 1, 9480], [440, -5, 369],
-             [419, -20, 407]],
-            dtype='int32')
-        self.doc.spacy_doc.from_array(cols, values)
 
-    def test_plaintext_functionality(self):
-        expected_1 = 'mr president i ask to have printed in the record copies of some of the'
-        observed_1 = textacy.preprocess_text(self.text, lowercase=True, no_punct=True)[:70]
-        expected_2 = [('ed States of America is an amazing ',
-                       'nation',
-                       ' that continues to lead the world t'),
-                      ('come the role model for developing ',
-                       'nation',
-                       's attempting to give their people t'),
-                      ('ve before to better ourselves as a ',
-                       'nation',
-                       ', because what we change will set a'),
-                      ('nd education. Fortunately, we as a ',
-                       'nation',
-                       ' have the opportunity to fix the in'),
-                      (' sentences. Judges from across the ',
-                       'nation',
-                       ' have said for decades that they do'),
-                      ('reopened many racial wounds in our ',
-                       'nation',
-                       '. The war on drugs also put addicts')]
-        observed_2 = list(textacy.text_utils.keyword_in_context(
-            self.text, 'nation', window_width=35, print_only=False))
-        self.assertEqual(observed_1, expected_1)
-        self.assertEqual(observed_2, expected_2)
+@pytest.fixture(scope='module')
+def doc(text):
+    spacy_lang = cache.load_spacy('en')
+    return Doc(text.strip(), lang=spacy_lang)
 
-    def test_extract_functionality(self):
-        observed_1 = [ng.text for ng in
-                      textacy.extract.ngrams(self.doc, 2, filter_stops=True, filter_punct=True, filter_nums=False)][:15]
-        expected_1 = ['Mr. President', 'Record copies', 'finalist essays',
-                      'essays written', 'Vermont High', 'High School',
-                      'School students', 'sixth annual', 'annual ``',
-                      'essay contest', 'contest conducted', 'nearly 800',
-                      '800 entries', 'material follows', 'United States']
-        observed_2 = [ng.text for ng in
-                      textacy.extract.ngrams(self.doc, 3, filter_stops=True, filter_punct=True, min_freq=2)]
-        expected_2 = ['lead the world', 'leading the world',
-                      '2.2 million people', '2.2 million people',
-                      'mandatory minimum sentences',
-                      'Mandatory minimum sentences', 'war on drugs',
-                      'war on drugs']
-        observed_3 = [ne.text for ne in
-                      textacy.extract.named_entities(self.doc, drop_determiners=True, exclude_types='numeric')]
-        expected_3 = ['Record', 'Vermont High School',
-                      'United States of America', 'Americans', 'U.S.', 'U.S.',
-                      'African American']
-        observed_4 = [match.text for match in
-                      textacy.extract.pos_regex_matches(self.doc, textacy.constants.POS_REGEX_PATTERNS['en']['NP'])][-10:]
-        expected_4 = ['experiment', 'many racial wounds', 'our nation',
-                      'The war', 'drugs', 'addicts', 'bars', 'addiction',
-                      'the problem', 'a mental health issue']
-        observed_5 = textacy.keyterms.textrank(self.doc, n_keyterms=5)
-        expected_5 = [('nation', 0.04315758994993049),
-                      ('world', 0.030590559641614556),
-                      ('incarceration', 0.029577233127175532),
-                      ('problem', 0.02411902162606202),
-                      ('people', 0.022631145896105508)]
-        self.assertEqual(observed_1, expected_1)
-        self.assertEqual(observed_2, expected_2)
-        self.assertEqual(observed_3, expected_3)
-        self.assertEqual(observed_4, expected_4)
-        for o, e in zip(observed_5, expected_5):
-            self.assertEqual(o[0], e[0])
-            self.assertAlmostEqual(o[1], e[1], places=4)
 
-    def test_readability(self):
-        observed = textacy.text_stats.readability_stats(self.doc)
-        expected = {'automated_readability_index': 11.67580188679245,
-                    'coleman_liau_index': 10.89927271226415,
-                    'flesch_kincaid_grade_level': 10.711962264150948,
-                    'flesch_readability_ease': 56.022660377358505,
-                    'gunning_fog_index': 13.857358490566037,
-                    'n_chars': 2026,
-                    'n_polysyllable_words': 57,
-                    'n_sents': 20,
-                    'n_syllables': 648,
-                    'n_unique_words': 228,
-                    'n_words': 424,
-                    'smog_index': 12.773325707644965}
-        for key in expected:
-            self.assertAlmostEqual(observed[key], expected[key], places=4)
+@pytest.fixture(scope='module')
+def corpus():
+    spacy_lang = cache.load_spacy('en')
+    records = DATASET.records(speaker_name={'Bernie Sanders'}, limit=10)
+    text_stream, metadata_stream = io.split_records(
+        records, 'text')
+    corpus = Corpus(spacy_lang, texts=text_stream, metadatas=metadata_stream)
+    return corpus
 
-    def test_term_counting(self):
-        observed_1 = self.doc.count('nation')
-        expected_1 = 5
-        bot = self.doc.to_bag_of_terms(
-            ngrams=1, normalize=False, lemmatize=True, as_strings=True)
-        # sort by term ascending, then count descending
-        observed_2 = sorted(bot.items(), key=itemgetter(1, 0), reverse=True)[:10]
-        expected_2 = [
-            ('nation', 6), ('world', 4), ('u.s.', 4), ('incarceration', 4),
-            ('decade', 4), ('state', 3), ('record', 3), ('problem', 3),
-            ('people', 3), ('minimum', 3)]
-        self.assertEqual(observed_1, expected_1)
-        self.assertEqual(observed_2, expected_2)
+
+def test_streaming_functionality(corpus):
+    assert isinstance(DATASET, textacy.datasets.base.Dataset)
+    assert isinstance(corpus, Corpus)
+
+
+def test_vectorization_and_topic_modeling_functionality(corpus):
+    n_topics = 10
+    top_n = 10
+    vectorizer = Vectorizer(
+        tf_type='linear', apply_idf=True, idf_type='smooth', norm=None,
+        min_df=2, max_df=0.95)
+    doc_term_matrix = vectorizer.fit_transform(
+        (doc.to_terms_list(ngrams=1, named_entities=True, as_strings=True)
+         for doc in corpus))
+    model = TopicModel('nmf', n_topics=n_topics)
+    model.fit(doc_term_matrix)
+    doc_topic_matrix = model.transform(doc_term_matrix)
+    assert isinstance(doc_term_matrix, sp.csr_matrix)
+    assert isinstance(doc_topic_matrix, np.ndarray)
+    assert doc_topic_matrix.shape[1] == n_topics
+    for topic_idx, top_terms in model.top_topic_terms(vectorizer.id_to_term, top_n=top_n):
+        assert isinstance(topic_idx, int)
+        assert len(top_terms) == top_n
+
+
+def test_corpus_functionality(corpus):
+    assert isinstance(corpus[0], Doc)
+    assert list(corpus.get(lambda doc: doc.metadata['speaker_name'] == 'Bernie Sanders'))
+
+
+def test_plaintext_functionality(text):
+    preprocessed_text = preprocess_text(
+        text, lowercase=True, no_punct=True)[:100]
+    assert all(char.islower() for char in preprocessed_text if char.isalpha())
+    assert all(char.isalnum() or char.isspace() for char in preprocessed_text)
+    keyword = 'America'
+    kwics = text_utils.keyword_in_context(
+        text, keyword, window_width=35, print_only=False)
+    for pre, kw, post in kwics:
+        assert kw == keyword
+        assert isinstance(pre, compat.unicode_)
+        assert isinstance(post, compat.unicode_)
+
+
+def test_extract_functionality(doc):
+    bigrams = list(extract.ngrams(
+        doc, 2, filter_stops=True, filter_punct=True, filter_nums=False))[:10]
+    for bigram in bigrams:
+        assert isinstance(bigram, SpacySpan)
+        assert len(bigram) == 2
+
+    trigrams = list(extract.ngrams(
+        doc, 3, filter_stops=True, filter_punct=True, min_freq=2))[:10]
+    for trigram in trigrams:
+        assert isinstance(trigram, SpacySpan)
+        assert len(trigram) == 3
+
+    nes = list(extract.named_entities(
+        doc, drop_determiners=False, exclude_types='numeric'))[:10]
+    for ne in nes:
+        assert isinstance(ne, SpacySpan)
+        assert ne.label_
+        assert ne.label_ != 'QUANTITY'
+
+    pos_regex_matches = list(extract.pos_regex_matches(
+        doc, constants.POS_REGEX_PATTERNS['en']['NP']))[:10]
+    for match in pos_regex_matches:
+        assert isinstance(match, SpacySpan)
+
+    stmts = list(extract.semistructured_statements(
+        doc, 'I', cue='be'))[:10]
+    for stmt in stmts:
+        assert isinstance(stmt, list)
+        assert isinstance(stmt[0], compat.unicode_)
+        assert len(stmt) == 3
+
+    kts = keyterms.textrank(
+        doc, n_keyterms=10)
+    for keyterm in kts:
+        assert isinstance(keyterm, tuple)
+        assert isinstance(keyterm[0], compat.unicode_)
+        assert isinstance(keyterm[1], float)
+        assert keyterm[1] > 0.0
+
+
+def test_text_stats_functionality(doc):
+    ts = TextStats(doc)
+
+    assert isinstance(ts.n_words, int)
+    assert isinstance(ts.flesch_kincaid_grade_level, float)
+
+    basic_counts = ts.basic_counts
+    assert isinstance(basic_counts, dict)
+    for field in ('n_chars', 'n_words', 'n_sents'):
+        assert isinstance(basic_counts.get(field), int)
+
+    readability_stats = ts.readability_stats
+    assert isinstance(readability_stats, dict)
+    for field in ('flesch_kincaid_grade_level', 'automated_readability_index', 'wiener_sachtextformel'):
+        assert isinstance(readability_stats.get(field), float)
