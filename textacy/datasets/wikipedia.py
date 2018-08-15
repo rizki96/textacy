@@ -48,7 +48,8 @@ DOWNLOAD_ROOT = 'https://dumps.wikimedia.org/'
 MAPPING_CAT = {
     'en': 'Category:',
     'fr': 'Catégorie:',
-    'de': 'Kategorie:'
+    'de': 'Kategorie:',
+    'id': 'Kategori:'
 }
 
 # nowiki tags: take contents verbatim
